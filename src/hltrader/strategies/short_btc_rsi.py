@@ -81,6 +81,8 @@ class ShortBtcRsiStrategy(Strategy):
         self._protective_order_id = None
         self._exit_order_id = None
         self._exposure_sync_attempts = 0
+        self._requested_protective_qty = Decimal(0)
+        self._flatten_outstanding: dict[ClientOrderId, Decimal] = {}
 
     def on_start(self) -> None:
         self._instrument = self.cache.instrument(self.config.instrument_id)
@@ -129,7 +131,19 @@ class ShortBtcRsiStrategy(Strategy):
         if event.instrument_id != self.config.instrument_id:
             return
         if self._entry_order_id is not None and event.client_order_id == self._entry_order_id:
-            self._converge_protection()
+            if self._machine.snapshot.state is StrategyState.EMERGENCY_EXIT:
+                self._emergency_flatten()
+            else:
+                self._converge_protection()
+            return
+        if event.client_order_id in self._flatten_outstanding:
+            remaining = self._flatten_outstanding[event.client_order_id] - event.last_qty.as_decimal()
+            if remaining > 0:
+                self._flatten_outstanding[event.client_order_id] = remaining
+            else:
+                self._flatten_outstanding.pop(event.client_order_id, None)
+            if self._machine.snapshot.state is StrategyState.EMERGENCY_EXIT:
+                self._emergency_flatten()
             return
         if (
             self._protective_order_id is not None
@@ -147,9 +161,15 @@ class ShortBtcRsiStrategy(Strategy):
     def on_order_rejected(self, event: OrderRejected) -> None:
         if self._protective_order_id is None or event.client_order_id != self._protective_order_id:
             return
+        if self._machine.snapshot.state is not StrategyState.PROTECTING:
+            return
         try:
-            self._machine.protection_failed(f"protective trigger rejected: {event.reason}")
+            snapshot = self._machine.protection_failed(
+                f"protective trigger rejected: {event.reason}"
+            )
         except InvalidTransition:
+            return
+        if snapshot.state is not StrategyState.EMERGENCY_EXIT:
             return
         self._persist()
         self._emergency_flatten()
@@ -157,10 +177,16 @@ class ShortBtcRsiStrategy(Strategy):
     def on_position_closed(self, event: PositionClosed) -> None:
         if event.instrument_id != self.config.instrument_id:
             return
+        actual_qty = self._actual_short_qty()
         try:
-            self._machine.confirm_closed()
+            self._machine.confirm_closed(actual_qty)
         except InvalidTransition:
             self._machine.mark_conflict("position closed outside an expected exit state")
+        except ValueError:
+            if self._machine.snapshot.state is StrategyState.EMERGENCY_EXIT:
+                self._emergency_flatten()
+            else:
+                self._machine.mark_conflict("position closed event received while exposure remains")
         self._persist()
 
     def on_stop(self) -> None:
@@ -245,6 +271,14 @@ class ShortBtcRsiStrategy(Strategy):
         self._machine.record_exposure(actual_qty, protected_qty)
 
         if protected_qty == actual_qty:
+            self._requested_protective_qty = actual_qty
+            self._persist()
+            return
+        if not protection_resize_required(
+            actual_qty=actual_qty,
+            protected_qty=protected_qty,
+            requested_qty=self._requested_protective_qty,
+        ):
             self._persist()
             return
         quantity = self._instrument.make_qty(actual_qty)
@@ -287,6 +321,7 @@ class ShortBtcRsiStrategy(Strategy):
         )
         if not submitted:
             return
+        self._requested_protective_qty = actual_qty
         self._persist()
 
     def _arm_protection_timer(self) -> None:
@@ -326,6 +361,8 @@ class ShortBtcRsiStrategy(Strategy):
     def _handle_protection_confirmation(self, client_order_id) -> None:
         if self._protective_order_id is None or client_order_id != self._protective_order_id:
             return
+        if self._machine.snapshot.state is StrategyState.EMERGENCY_EXIT:
+            return
         actual_qty = self._actual_short_qty()
         protected_qty = self._accepted_protective_qty()
         try:
@@ -341,7 +378,9 @@ class ShortBtcRsiStrategy(Strategy):
     def _on_protection_timeout(self, _) -> None:
         if self._machine.snapshot.state is not StrategyState.PROTECTING:
             return
-        self._machine.protection_failed("protective trigger confirmation timed out")
+        snapshot = self._machine.protection_failed("protective trigger confirmation timed out")
+        if snapshot.state is not StrategyState.EMERGENCY_EXIT:
+            return
         self._persist()
         self._emergency_flatten()
 
@@ -353,22 +392,41 @@ class ShortBtcRsiStrategy(Strategy):
             self._submit_close(position, reason.value)
 
     def _emergency_flatten(self) -> None:
-        for position in self._short_positions():
-            self._submit_close(position, "emergency_exit")
+        actual_qty = self._actual_short_qty()
+        self._machine.record_emergency_exposure(actual_qty)
+        if actual_qty == 0:
+            self._persist()
+            return
+        outstanding = sum(self._flatten_outstanding.values(), start=Decimal(0))
+        flatten_qty = actual_qty - outstanding
+        if flatten_qty <= 0:
+            self._persist()
+            return
+        positions = self._short_positions()
+        if not positions:
+            self._persist()
+            return
+        self._submit_close(positions[0], "emergency_exit", quantity=flatten_qty)
 
-    def _submit_close(self, position, reason: str) -> None:
+    def _submit_close(self, position, reason: str, *, quantity: Decimal | None = None) -> None:
+        order_quantity = (
+            position.quantity if quantity is None else self._instrument.make_qty(quantity)
+        )
         order = self.order_factory.market(
             instrument_id=position.instrument_id,
             order_side=OrderSide.BUY,
-            quantity=position.quantity,
+            quantity=order_quantity,
             reduce_only=True,
             tags=[reason],
         )
         self._exit_order_id = order.client_order_id
+        if reason == "emergency_exit":
+            self._flatten_outstanding[order.client_order_id] = order_quantity.as_decimal()
         self._persist()
         try:
             self.submit_order(order, position_id=position.id)
         except Exception as exc:  # noqa: BLE001 - fail closed across the framework boundary
+            self._flatten_outstanding.pop(order.client_order_id, None)
             try:
                 self._machine.recovery_required(
                     f"exit submission failed: {exc}",
@@ -464,6 +522,15 @@ def protective_order_type(direction: PriceDirection) -> OrderType:
     return (
         OrderType.STOP_MARKET if direction is PriceDirection.ABOVE else OrderType.MARKET_IF_TOUCHED
     )
+
+
+def protection_resize_required(
+    *, actual_qty: Decimal, protected_qty: Decimal, requested_qty: Decimal
+) -> bool:
+    """Return whether a new venue command is needed for the cumulative exposure."""
+    if protected_qty == actual_qty:
+        return False
+    return requested_qty != actual_qty
 
 
 def _client_order_id(value: str | None) -> ClientOrderId | None:

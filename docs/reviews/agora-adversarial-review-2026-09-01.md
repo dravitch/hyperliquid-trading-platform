@@ -79,7 +79,8 @@ quantités exactes. Le contrat est dans `agora-test-contract-2026-09-01.md`.
 
 ## Preuves exécutées
 
-- 40 tests réussis.
+- 40 tests réussis au moment de cette revue. La suite courante en compte 57; voir
+  `PROGRESSION.md` pour les jalons postérieurs.
 - Ruff réussi.
 - `git diff --check` réussi.
 - Test réel `BacktestEngine` avec message queue et observation du cache dans le callback de fill.

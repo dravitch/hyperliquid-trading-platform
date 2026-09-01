@@ -68,6 +68,8 @@ class StrategyStateMachine:
     def confirm_protection(self, protected_qty: Decimal) -> StrategySnapshot:
         with self._lock:
             current = self._snapshot
+            if current.state is StrategyState.EMERGENCY_EXIT:
+                return current
             if current.state not in {StrategyState.PROTECTING, StrategyState.OPEN}:
                 raise InvalidTransition(f"cannot confirm protection from {current.state}")
             if protected_qty < 0 or protected_qty > current.actual_net_position_qty:
@@ -95,6 +97,8 @@ class StrategyStateMachine:
 
     def protection_failed(self, reason: str) -> StrategySnapshot:
         with self._lock:
+            if self._snapshot.state in {StrategyState.OPEN, StrategyState.EMERGENCY_EXIT}:
+                return self._snapshot
             if self._snapshot.state is not StrategyState.PROTECTING:
                 raise InvalidTransition(f"cannot emergency-exit from {self._snapshot.state}")
             self._snapshot = StrategySnapshot(
@@ -102,6 +106,22 @@ class StrategyStateMachine:
                 self._snapshot.actual_net_position_qty,
                 self._snapshot.protected_qty,
                 reason,
+            )
+            return self._snapshot
+
+    def record_emergency_exposure(self, actual_qty: Decimal) -> StrategySnapshot:
+        """Refresh economic exposure while emergency flattening is in progress."""
+        if actual_qty < 0:
+            raise ValueError("actual emergency exposure cannot be negative")
+        with self._lock:
+            current = self._snapshot
+            if current.state is not StrategyState.EMERGENCY_EXIT:
+                raise InvalidTransition(f"cannot record emergency exposure from {current.state}")
+            self._snapshot = StrategySnapshot(
+                StrategyState.EMERGENCY_EXIT,
+                actual_qty,
+                min(current.protected_qty, actual_qty),
+                current.exit_reason,
             )
             return self._snapshot
 
@@ -129,12 +149,22 @@ class StrategyStateMachine:
             )
             return self._snapshot
 
-    def confirm_closed(self) -> StrategySnapshot:
-        return self._transition(
-            {StrategyState.EXITING, StrategyState.EMERGENCY_EXIT},
-            StrategyState.CLOSED_FINAL,
-            clear_quantities=True,
-        )
+    def confirm_closed(self, actual_qty: Decimal = Decimal(0)) -> StrategySnapshot:
+        if actual_qty != 0:
+            raise ValueError("cannot confirm closed while economic exposure remains")
+        with self._lock:
+            current = self._snapshot
+            if current.state is StrategyState.CLOSED_FINAL:
+                return current
+            if current.state not in {StrategyState.EXITING, StrategyState.EMERGENCY_EXIT}:
+                raise InvalidTransition(f"cannot transition {current.state} -> CLOSED_FINAL")
+            self._snapshot = StrategySnapshot(
+                StrategyState.CLOSED_FINAL,
+                Decimal(0),
+                Decimal(0),
+                current.exit_reason,
+            )
+            return self._snapshot
 
     def mark_conflict(self, reason: str) -> StrategySnapshot:
         with self._lock:

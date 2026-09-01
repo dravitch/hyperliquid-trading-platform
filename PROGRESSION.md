@@ -50,7 +50,7 @@ demeure explicitement désactivé dans la configuration.
 
 ### Tests et qualité
 
-- 40 tests déterministes et d'intégration réussis.
+- 57 tests déterministes et d'intégration réussis.
 - Scénarios couverts : seuils inclusifs, sizing, partial fills, double signal concurrent,
   protection rejetée, absence de réentrée, redémarrage, conflits journal/exchange, journal
   corrompu et désaccord de marge ou de levier.
@@ -106,6 +106,26 @@ du levier ou du mode de marge. Les deux derniers résultats bloqueront l'entrée
 - Commande reproductible : `uv run hnt-backtest-probe`, avec rapport JSON atomique dans
   `artifacts/backtests/mark-price-semantics.json`.
 - Quatre tests couvrent les trois verdicts et le comportement réel du moteur épinglé.
+
+### Lifecycle concurrent de protection — jalon 3
+
+- Fill #1 protégé puis fill #2 : retour immédiat `OPEN -> PROTECTING`, avec protection attendue
+  calculée sur l'exposition cumulative.
+- Fill #2 pendant acceptation pending : une acceptation ne couvrant que fill #1 ne peut pas ouvrir
+  la stratégie; un nouveau resize reste requis.
+- Courses acceptation/timeout : un seul état absorbant gagne, sans coexistence logique entre
+  `OPEN` et `EMERGENCY_EXIT` et sans double flatten.
+- Rejet pendant resize : passage à `EMERGENCY_EXIT`, conservation de la quantité sous-protégée et
+  journalisation de la cause initiale malgré les rejets dupliqués.
+- Fill tardif pendant `EMERGENCY_EXIT` : exposition relue et shortfall de flatten recalculé comme
+  `actual_net_position_qty - outstanding_flatten_qty`.
+- Un `PositionClosed` ne peut plus produire `CLOSED_FINAL` tant que l'exposition nette relue n'est
+  pas nulle.
+- Événements dupliqués : resize pending identique supprimé, rejet idempotent, clôture finale
+  idempotente et aucun double flatten pour une exposition déjà couverte par un ordre pending.
+- Les 24 permutations de fill, acceptation, timeout et rejet conservent l'invariant : jamais
+  `OPEN` lorsque `protected_qty < actual_net_position_qty`.
+- ADR 0003 ajouté pour documenter les quatre écarts architecturaux découverts avant correction.
 
 ### Revue adversariale AGORA — jalon 2
 
@@ -209,12 +229,10 @@ sur ce dépôt devront donc employer explicitement `id_ed25519_dravitch`, ou une
 
 ## Prochaines étapes
 
-1. Ajouter des tests d'intégration Nautilus avec fills successifs, acceptation différée et
-   timeout/rejet concurrents.
-2. Étendre les tests de restart et réconciliation journal/cache/exposition.
-3. Ajouter le venue verifier public ternaire du mode de marge/levier.
-4. Câbler un runner testnet fail-closed, maintenu désactivé sans agent et sans secrets.
-5. Avant tout testnet, confirmer la direction du seuil de 60 000 USD, le notional de 300 USDC et
+1. Étendre les tests de restart et réconciliation journal/cache/exposition.
+2. Ajouter le venue verifier public ternaire du mode de marge/levier.
+3. Câbler un runner testnet fail-closed, maintenu désactivé sans agent et sans secrets.
+4. Avant tout testnet, confirmer la direction du seuil de 60 000 USD, le notional de 300 USDC et
    le mode de marge isolée.
 
 ## Décisions et blocages ouverts

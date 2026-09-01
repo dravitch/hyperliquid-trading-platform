@@ -145,6 +145,16 @@ Un guide opérateur complet est disponible dans `docs/wallet-setup.md`. Il expli
 comment vérifier l'agent sur Hyperliquid et comment distinguer adresse publique, clé privée et
 signature.
 
+### Procédure KBM de dépôt et création d'agent
+
+- Article `KB-HOME-HYPERLIQUID-001` ajouté dans KBM 2.0 sous `Corpus > HOME > Hyperliquid`.
+- Dépôt opératoire fixé à 10 USDC natifs via Arbitrum, au-dessus du minimum officiel de 5 USDC.
+- Contrôles documentés : compte MetaMask, réseau, token, ETH de gas, crédit API et absence de
+  second dépôt tant que le premier n'est pas résolu.
+- Création de l'agent `Nautilus` placée après confirmation d'un `accountValue` positif.
+- Adresse d'agent obligatoirement distincte et secrets exclus de KBM et de Git.
+- `HLTRADER_MAINNET_ENABLED=false` demeure obligatoire après cette activation administrative.
+
 Commande de validation :
 
 ```bash

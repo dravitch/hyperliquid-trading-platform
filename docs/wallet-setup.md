@@ -2,7 +2,25 @@
 
 Dernière mise à jour : 1 septembre 2026
 
-## Les deux identités obligatoires
+## Identité actuellement confirmée
+
+Le compte visible dans MetaMask est :
+
+```text
+0x4c017d1f234F331ba4cc0ad6A356fa325c252299
+```
+
+Il s'agit donc de `HYPERLIQUID_ACCOUNT_ADDRESS`, c'est-à-dire du compte principal contrôlé par
+MetaMask. Le 1 septembre 2026, l'API mainnet Hyperliquid retourne pour cette adresse un compte
+vide (`accountValue = 0`) et aucune autorisation d'agent (`extraAgents = []`). Le message
+`ApproveAgent` précédemment affiché ne constitue pas une preuve d'enregistrement : sa transaction
+n'a pas été acceptée par Hyperliquid, ou l'autorisation n'est plus active.
+
+Ne pas configurer cette même adresse comme agent `Nautilus`. Après activation du compte principal,
+il faudra créer un portefeuille API distinct dans Hyperliquid et conserver sa clé privée hors de
+MetaMask.
+
+## Les deux identités nécessaires au bot
 
 Le bot utilise deux identités différentes :
 
@@ -17,8 +35,11 @@ autorisé; elle ne remplace jamais l'adresse du compte principal.
 
 ## Où trouver `HYPERLIQUID_ACCOUNT_ADDRESS`
 
-Il s'agit de l'adresse publique du compte MetaMask qui était sélectionné au moment de signer le
-message EIP-712 `ApproveAgent` pour l'agent `Nautilus`.
+Il s'agit de l'adresse publique du compte MetaMask principal. Elle est maintenant confirmée :
+
+```text
+HYPERLIQUID_ACCOUNT_ADDRESS=0x4c017d1f234F331ba4cc0ad6A356fa325c252299
+```
 
 Dans MetaMask :
 
@@ -43,32 +64,28 @@ Avant d'activer un runner :
 
 1. Se connecter au site officiel Hyperliquid avec ce même compte MetaMask.
 2. Ouvrir la page Portfolio/API et confirmer que l'agent nommé `Nautilus` apparaît.
-3. Confirmer que l'adresse de l'agent affichée est :
-
-   ```text
-   0x4c017d1f234f331ba4cc0ad6a356fa325c252299
-   ```
-
+3. Confirmer que son adresse est différente de `0x4c017d...2299`.
 4. Confirmer que les soldes et positions visibles appartiennent bien au compte principal copié.
 5. Laisser le bot désactivé si l'agent n'apparaît pas ou si le compte affiché diffère.
 
-## Métadonnées de l'agent actuel
+## Tentative d'approbation non active
 
 ```text
-Nom                 Nautilus
-Adresse publique    0x4c017d1f234f331ba4cc0ad6a356fa325c252299
+Nom demandé         Nautilus
+Agent demandé       0x4c017d1f234f331ba4cc0ad6a356fa325c252299
 Approbation          2026-09-01 05:14:54 UTC
 Expiration           2027-02-28 05:15:13 UTC
 Durée                environ 180 jours
+État API             non enregistré (`extraAgents = []`)
 ```
 
-Le dépôt d'activation doit créditer le compte principal Hyperliquid connecté avec MetaMask,
-jamais l'adresse publique de l'agent.
+Cette adresse étant celle du compte MetaMask, la tentative revenait à demander au compte de
+s'autoriser lui-même comme agent. Elle ne doit pas être utilisée comme configuration d'agent.
 
 ## Où trouver `HYPERLIQUID_MAINNET_PK`
 
-Cette variable reçoit exclusivement la clé privée générée lors de la création de l'API wallet
-`Nautilus`. Elle doit correspondre à l'adresse publique de l'agent ci-dessus.
+Cette variable reçoit exclusivement la clé privée générée lors de la future création d'un API
+wallet `Nautilus` distinct. Elle devra correspondre à la nouvelle adresse publique de cet agent.
 
 Ne jamais y placer :
 
@@ -83,9 +100,9 @@ la copier dans un ticket, un chat, un commit ou une capture d'écran.
 
 ## État actuel du `.env`
 
-- L'adresse et les dates publiques de l'agent sont documentées.
-- `HYPERLIQUID_ACCOUNT_ADDRESS` reste vide jusqu'à copie de l'adresse MetaMask principale.
-- `HYPERLIQUID_MAINNET_PK` reste vide jusqu'à récupération sécurisée de la clé privée de l'agent.
+- `HYPERLIQUID_ACCOUNT_ADDRESS` contient l'adresse MetaMask confirmée.
+- Les champs d'agent restent vides puisqu'aucun agent n'est actif selon l'API.
+- `HYPERLIQUID_MAINNET_PK` reste vide jusqu'à la création sécurisée d'un nouvel agent distinct.
 - `HLTRADER_MAINNET_ENABLED=false` reste obligatoire.
 - Le fichier `.env` est ignoré par Git et protégé avec les permissions Unix `600`.
 

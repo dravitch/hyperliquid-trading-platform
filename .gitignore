@@ -11,4 +11,4 @@ build/
 data/backtests/*
 !data/backtests/.gitkeep
 var/
-
+artifacts/

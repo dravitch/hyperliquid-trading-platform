@@ -129,7 +129,9 @@ des opérations privées signées via l'endpoint `exchange`, notamment l'action 
 - [x] Épingler `nautilus_trader==1.231.0` dans `pyproject.toml`.
 - [x] Caractériser le chemin `normalTpsl` de Nautilus 1.231.0 par inspection du commit source.
 - [x] Confirmer documentairement que Hyperliquid utilise le mark price pour les TP/SL.
-- [ ] Vérifier avec `BacktestEngine` que notre implémentation respecte cette sémantique.
+- [x] Exécuter un probe `BacktestEngine` avec quote sous le seuil et mark price au-dessus. Le
+      moteur reçoit `MarkPriceUpdate`, mais son trigger natif simulé ne se déclenche pas : verdict
+      `UNVERIFIABLE` pour l'équivalence native dans NautilusTrader 1.231.0.
 - [ ] Vérifier sur testnet le lifecycle réel trigger, acceptation, fill et événements WS.
 - [ ] Déterminer ce que `clearinghouseState` permet réellement de vérifier avant entrée sans
       position BTC.

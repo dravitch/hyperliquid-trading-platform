@@ -94,6 +94,19 @@ Le futur venue verifier public adoptera un reçu ternaire `VERIFIED`, `MISMATCH`
 `UNVERIFIABLE`. L'absence de position BTC ne sera jamais interprétée comme une preuve de conformité
 du levier ou du mode de marge. Les deux derniers résultats bloqueront l'entrée.
 
+### Runner BacktestEngine — sémantique mark price
+
+- Contrat explicite ajouté : `MARK_PRICE_EQUIVALENT_CONFIRMED`, `PROXY_USED` ou `UNVERIFIABLE`.
+- Probe déterministe exécuté avec un quote restant sous le seuil et un `MarkPriceUpdate` le
+  franchissant seul.
+- NautilusTrader 1.231.0 transmet bien le mark price à la stratégie, mais le matching simulé ne
+  déclenche pas le `STOP_MARKET` natif dans ce scénario.
+- Verdict courant : `UNVERIFIABLE`; aucune équivalence venue n'est revendiquée.
+- Un futur pont mark-price vers le matching sera obligatoirement déclaré `PROXY_USED`.
+- Commande reproductible : `uv run hnt-backtest-probe`, avec rapport JSON atomique dans
+  `artifacts/backtests/mark-price-semantics.json`.
+- Quatre tests couvrent les trois verdicts et le comportement réel du moteur épinglé.
+
 ### Revue adversariale AGORA — jalon 2
 
 - Revue réelle exécutée dans `/home/andrei/Projects/61_AGORA`.
@@ -196,13 +209,12 @@ sur ce dépôt devront donc employer explicitement `id_ed25519_dravitch`, ou une
 
 ## Prochaines étapes
 
-1. Implémenter le runner `BacktestEngine` et démontrer la sémantique mark-price du trigger.
-2. Ajouter des tests d'intégration Nautilus avec fills successifs, acceptation différée et
+1. Ajouter des tests d'intégration Nautilus avec fills successifs, acceptation différée et
    timeout/rejet concurrents.
-3. Étendre les tests de restart et réconciliation journal/cache/exposition.
-4. Ajouter le venue verifier public ternaire du mode de marge/levier.
-5. Câbler un runner testnet fail-closed, maintenu désactivé sans agent et sans secrets.
-6. Avant tout testnet, confirmer la direction du seuil de 60 000 USD, le notional de 300 USDC et
+2. Étendre les tests de restart et réconciliation journal/cache/exposition.
+3. Ajouter le venue verifier public ternaire du mode de marge/levier.
+4. Câbler un runner testnet fail-closed, maintenu désactivé sans agent et sans secrets.
+5. Avant tout testnet, confirmer la direction du seuil de 60 000 USD, le notional de 300 USDC et
    le mode de marge isolée.
 
 ## Décisions et blocages ouverts

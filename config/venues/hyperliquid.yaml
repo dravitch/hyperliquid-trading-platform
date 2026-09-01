@@ -1,0 +1,7 @@
+venue: HYPERLIQUID
+network: testnet
+account_address_env: HYPERLIQUID_ACCOUNT_ADDRESS
+private_key_env: HYPERLIQUID_TESTNET_PK
+vault_env: HYPERLIQUID_TESTNET_VAULT
+reconcile_on_startup: true
+

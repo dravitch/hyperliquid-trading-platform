@@ -1,0 +1,40 @@
+strategy: ShortBtcRsiStrategy
+venue: HYPERLIQUID
+symbol: BTC-USD-PERP
+side: SHORT
+deployment_enabled: false
+
+desired_margin:
+  mode: isolated
+  leverage: 3
+  verify_before_entry: true
+
+position:
+  sizing_mode: fixed_notional
+  notional_usdc: 300
+
+entry:
+  mode: immediate
+  protective_trigger: at_fill
+
+exit:
+  logic: FIRST_TRIGGER_WINS
+  rsi:
+    period: 14
+    bar_type: 1-DAY
+    price_source: close
+    warmup_bars: 30
+    threshold: 20
+    condition: less_than_or_equal
+  price_target:
+    level: 60000
+    direction: above  # Must be confirmed before enabling testnet deployment.
+    trigger_price_source: mark
+    execution: native_reduce_only_trigger
+
+risk:
+  max_notional_usdc: 300
+  max_leverage: 3
+  emergency_close_enabled: true
+  reentry_after_exit: false
+

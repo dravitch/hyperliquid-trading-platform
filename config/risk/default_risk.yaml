@@ -1,0 +1,5 @@
+max_notional_usdc: 300
+max_leverage: 3
+emergency_close_enabled: true
+reentry_after_exit: false
+

@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hltrader"
+version = "0.1.0"
+description = "Pure domain core for a Hyperliquid trading strategy"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    "nautilus-trader==1.231.0",
+    "PyYAML>=6.0.2,<7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3,<9", "pytest-cov>=5,<6", "ruff>=0.9,<1"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

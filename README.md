@@ -20,3 +20,5 @@ python -m venv .venv
 The sample configuration is fail-closed for live use: `deployment_enabled: false`. The price
 threshold direction and notional must be reviewed before testnet deployment.
 
+Wallet roles, secret handling and the exact procedure for locating
+`HYPERLIQUID_ACCOUNT_ADDRESS` are documented in [`docs/wallet-setup.md`](docs/wallet-setup.md).

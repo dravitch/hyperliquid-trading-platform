@@ -136,6 +136,11 @@ Le dépôt d'activation doit créditer le compte principal Hyperliquid contrôl�
 l'adresse publique de l'API wallet. L'agent sert à signer; le compte principal reste la source de
 vérité pour soldes, positions, ordres et événements utilisateur.
 
+Un guide opérateur complet est disponible dans `docs/wallet-setup.md`. Il explique comment copier
+`HYPERLIQUID_ACCOUNT_ADDRESS` depuis les détails du compte MetaMask ayant signé `ApproveAgent`,
+comment vérifier l'agent sur Hyperliquid et comment distinguer adresse publique, clé privée et
+signature.
+
 Commande de validation :
 
 ```bash

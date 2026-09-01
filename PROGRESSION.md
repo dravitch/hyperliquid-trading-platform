@@ -50,7 +50,7 @@ demeure explicitement désactivé dans la configuration.
 
 ### Tests et qualité
 
-- 31 tests déterministes réussis.
+- 40 tests déterministes et d'intégration réussis.
 - Scénarios couverts : seuils inclusifs, sizing, partial fills, double signal concurrent,
   protection rejetée, absence de réentrée, redémarrage, conflits journal/exchange, journal
   corrompu et désaccord de marge ou de levier.
@@ -65,8 +65,9 @@ demeure explicitement désactivé dans la configuration.
 - Chargement de 30 barres daily, initialisation du RSI Nautilus et abonnement au flux live.
 - Conversion explicite du RSI Nautilus, normalisé entre 0 et 1, vers l'échelle métier 0–100.
 - Abonnement aux quotes exigé avant l'ordre marché Hyperliquid.
-- Entrée short par notional fixe après warm-up et seulement si les deux verrous
-  `enable_order_submission` et `venue_margin_verified` sont vrais.
+- Entrée short par notional fixe après warm-up, si `enable_order_submission` est vrai et si un
+  reçu récent de vérification venue correspond exactement au compte, réseau, instrument, mode de
+  marge et levier configurés.
 - Création d'un trigger natif reduce-only après fill de l'entrée.
 - Direction `above` mappée sur `STOP_MARKET`; direction `below` mappée sur
   `MARKET_IF_TOUCHED`.
@@ -84,6 +85,32 @@ Le tag officiel NautilusTrader `v1.231.0` a été inspecté. L'adapter reconnaî
 fenêtre d'exposition non protégée subsiste donc. Cette conclusion et ses conséquences sont
 consignées dans `docs/decisions/0002-hyperliquid-normal-tpsl-v1.231.0.md`.
 
+### Revue adversariale AGORA — jalon 2
+
+- Revue réelle exécutée dans `/home/andrei/Projects/61_AGORA`.
+- Expérience canonique : `AGO-EXP-2026-0026`.
+- Verdict : `NUANCED`, confiance `0.68`.
+- Rapport, dossier soumis et contrat de tests préenregistré archivés dans `docs/reviews/`.
+- Le runner testnet demeure bloqué; la revue autorise uniquement la poursuite du développement
+  sous conditions vérifiables.
+
+Corrections issues de la revue :
+
+- retry borné lorsque le fill arrive avant visibilité de la position dans le cache;
+- `RECOVERY_REQUIRED` après échec synchrone de soumission de l'entrée;
+- watchdog armé avant soumission ou modification du trigger;
+- `EMERGENCY_EXIT` persistant après échec synchrone de protection;
+- construction explicite et journalisation de l'ordre de sortie;
+- suppression du booléen `venue_margin_verified` au profit d'un reçu structuré, lié au compte et
+  limité dans le temps;
+- conflit explicite si les ordres protecteurs réels ne correspondent pas uniquement à l'identité
+  journalisée;
+- trace d'audit JSONL versionnée et déterministe;
+- test d'intégration avec le vrai `BacktestEngine` Nautilus 1.231.0.
+
+Le test moteur démontre que le cache position est mis à jour avant `on_order_filled` dans le
+backtest déterministe. Cette preuve ne s'étend pas au moteur live.
+
 Commande de validation :
 
 ```bash
@@ -100,8 +127,7 @@ uv run --extra dev ruff check src tests
 - Empreinte vérifiée : `SHA256:7Q0E8ngs3J/Cbf/uTOWsThowkrlyDd6dmmGSKqMkVu4`.
 - Authentification SSH explicite réussie comme utilisateur GitHub `dravitch`.
 - Accès Git au dépôt vérifié avec la clé privée correspondante et `IdentitiesOnly=yes`.
-- Le dépôt distant ne contient actuellement aucune référence : il est vide et n'a pas encore de
-  branche par défaut.
+- La branche `main` est publiée et suit `origin/main`.
 
 La clé SSH choisie par défaut sur cette machine reste celle de `symbioticode`. Les opérations Git
 sur ce dépôt devront donc employer explicitement `id_ed25519_dravitch`, ou une entrée dédiée dans
@@ -109,13 +135,12 @@ sur ce dépôt devront donc employer explicitement `id_ed25519_dravitch`, ou une
 
 ## Prochaines étapes
 
-1. Initialiser le dépôt Git local et publier le socle actuel sur une première branche distante.
-2. Configurer durablement l'identité SSH `dravitch` pour ce dépôt.
-3. Ajouter le runner Nautilus testable et la vérification directe du mode de marge/levier côté
-   Hyperliquid avant d'autoriser l'entrée.
-4. Ajouter des tests d'intégration avec cache, événements de fills successifs et timeout simulé.
-5. Implémenter le runner de backtest et vérifier la sémantique mark-price du trigger.
-6. Avant tout testnet, confirmer la direction du seuil de 60 000 USD, le notional de 300 USDC et
+1. Ajouter le runner de vérification directe du mode de marge/levier côté Hyperliquid qui produit
+   le reçu structuré exigé par l'adapter.
+2. Ajouter des tests d'intégration Nautilus avec événements de fills successifs et timeout/rejet
+   concurrents.
+3. Implémenter le runner de backtest et vérifier la sémantique mark-price du trigger.
+4. Avant tout testnet, confirmer la direction du seuil de 60 000 USD, le notional de 300 USDC et
    le mode de marge isolée.
 
 ## Décisions et blocages ouverts
@@ -123,7 +148,10 @@ sur ce dépôt devront donc employer explicitement `id_ed25519_dravitch`, ou une
 - Direction du seuil de prix : `above` est configuré provisoirement, mais doit être confirmé.
 - Notional : 300 USDC est une valeur provisoire à confirmer.
 - NautilusTrader est installé et épinglé, mais le runner live/testnet n'est pas encore câblé.
-- L'API standard de stratégie ne prouve pas le mode de marge et le levier Hyperliquid; l'entrée
-  reste bloquée jusqu'à l'ajout d'une vérification venue dédiée.
+- L'API standard de stratégie ne prouve pas le mode de marge et le levier Hyperliquid. Le booléen
+  de confiance a été supprimé; l'entrée exige un reçu structuré que seul le futur vérificateur
+  venue pourra produire.
+- Verdict AGORA `NUANCED` : aucune autorisation de runner testnet tant que les risques blocants du
+  rapport de revue ne sont pas clos.
 - Aucun secret Hyperliquid n'a été configuré et aucune connexion à la venue n'a été effectuée.
 - Le statut juridique et les conditions Hyperliquid doivent être revérifiés avant le mainnet.

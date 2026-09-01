@@ -25,7 +25,10 @@ from hltrader.domain.reconciliation import ExchangeSnapshot, reconcile
 from hltrader.domain.sizing import PositionSizing
 from hltrader.domain.state_machine import InvalidTransition, StrategyState, StrategyStateMachine
 from hltrader.indicators.rsi import RsiWarmupPolicy
+from hltrader.orchestration.submission import submit_entry_safely, submit_protection_safely
 from hltrader.persistence.run_journal import RunJournal, RunRecord
+from hltrader.risk.guard import MarginMode
+from hltrader.risk.margin_verification import MarginVerificationError, load_margin_verification
 
 
 class ShortBtcRsiConfig(StrategyConfig, frozen=True):
@@ -41,7 +44,12 @@ class ShortBtcRsiConfig(StrategyConfig, frozen=True):
     price_level: Decimal = Decimal(60000)
     price_direction: PriceDirection = PriceDirection.ABOVE
     enable_order_submission: bool = False
-    venue_margin_verified: bool = False
+    account_address: str = ""
+    environment: str = "testnet"
+    desired_margin_mode: MarginMode = MarginMode.ISOLATED
+    desired_leverage: Decimal = Decimal(3)
+    margin_verification_path: str | None = None
+    margin_verification_max_age_secs: int = 300
     protection_timeout_secs: int = 10
 
 
@@ -57,6 +65,7 @@ class ShortBtcRsiStrategy(Strategy):
     NAUTILUS_VERSION = "1.231.0"
     NORMAL_TPSL_IS_ATOMIC = False
     PROTECTION_TIMER = "protective-trigger-confirmation"
+    EXPOSURE_SYNC_TIMER = "position-cache-synchronization"
 
     def __init__(self, config: ShortBtcRsiConfig) -> None:
         super().__init__(config)
@@ -71,6 +80,7 @@ class ShortBtcRsiStrategy(Strategy):
         self._entry_order_id = None
         self._protective_order_id = None
         self._exit_order_id = None
+        self._exposure_sync_attempts = 0
 
     def on_start(self) -> None:
         self._instrument = self.cache.instrument(self.config.instrument_id)
@@ -177,8 +187,8 @@ class ShortBtcRsiStrategy(Strategy):
         if not self.config.enable_order_submission:
             self.log.warning("Order submission disabled by configuration")
             return
-        if not self.config.venue_margin_verified:
-            self.log.error("Entry blocked: venue margin mode and leverage are not verified")
+        if not self._margin_is_verified():
+            self.log.error("Entry blocked: no matching fresh venue margin verification receipt")
             return
 
         quote = self.cache.quote_tick(self.config.instrument_id)
@@ -198,12 +208,39 @@ class ShortBtcRsiStrategy(Strategy):
         self._machine.begin_entry()
         self._entry_order_id = order.client_order_id
         self._persist()
-        self.submit_order(order)
+        submit_entry_safely(
+            self._machine,
+            submit=lambda: self.submit_order(order),
+            persist=self._persist,
+            report_error=self.log.error,
+        )
+
+    def _margin_is_verified(self) -> bool:
+        if not self.config.margin_verification_path or not self.config.account_address:
+            return False
+        try:
+            receipt = load_margin_verification(Path(self.config.margin_verification_path))
+        except MarginVerificationError as exc:
+            self.log.error(str(exc))
+            return False
+        return receipt.matches(
+            account_address=self.config.account_address,
+            environment=self.config.environment,
+            instrument_id=str(self.config.instrument_id),
+            margin_mode=self.config.desired_margin_mode,
+            leverage=self.config.desired_leverage,
+            now=self.clock.utc_now(),
+            max_age_seconds=self.config.margin_verification_max_age_secs,
+        )
 
     def _converge_protection(self) -> None:
         actual_qty = self._actual_short_qty()
         if actual_qty <= 0:
+            self._schedule_exposure_sync_retry()
             return
+        self._exposure_sync_attempts = 0
+        if self.clock.next_time_ns(self.EXPOSURE_SYNC_TIMER) > 0:
+            self.clock.cancel_timer(self.EXPOSURE_SYNC_TIMER)
         protected_qty = self._accepted_protective_qty()
         self._machine.record_exposure(actual_qty, protected_qty)
 
@@ -211,6 +248,8 @@ class ShortBtcRsiStrategy(Strategy):
             self._persist()
             return
         quantity = self._instrument.make_qty(actual_qty)
+        trigger = None
+        order = None
         if self._protective_order_id is None:
             factory_method = (
                 self.order_factory.stop_market
@@ -226,7 +265,6 @@ class ShortBtcRsiStrategy(Strategy):
                 tags=["native-price-protection"],
             )
             self._protective_order_id = trigger.client_order_id
-            self.submit_order(trigger)
         else:
             order = self.cache.order(self._protective_order_id)
             if order is None or order.is_closed:
@@ -234,7 +272,24 @@ class ShortBtcRsiStrategy(Strategy):
                 self._persist()
                 self._emergency_flatten()
                 return
-            self.modify_order(order, quantity=quantity)
+        submitted = submit_protection_safely(
+            self._machine,
+            arm_timer=self._arm_protection_timer,
+            cancel_timer=self._cancel_protection_timer,
+            submit=(
+                (lambda: self.submit_order(trigger))
+                if trigger is not None
+                else (lambda: self.modify_order(order, quantity=quantity))
+            ),
+            persist=self._persist,
+            emergency_flatten=self._emergency_flatten,
+            report_error=self.log.error,
+        )
+        if not submitted:
+            return
+        self._persist()
+
+    def _arm_protection_timer(self) -> None:
         self.clock.set_time_alert(
             self.PROTECTION_TIMER,
             self.clock.utc_now() + timedelta(seconds=self.config.protection_timeout_secs),
@@ -242,7 +297,31 @@ class ShortBtcRsiStrategy(Strategy):
             override=True,
             allow_past=False,
         )
-        self._persist()
+
+    def _cancel_protection_timer(self) -> None:
+        if self.clock.next_time_ns(self.PROTECTION_TIMER) > 0:
+            self.clock.cancel_timer(self.PROTECTION_TIMER)
+
+    def _schedule_exposure_sync_retry(self) -> None:
+        self._exposure_sync_attempts += 1
+        if self._exposure_sync_attempts > 3:
+            self._machine.recovery_required(
+                "entry fill observed but position cache remained empty",
+                allowed={
+                    StrategyState.ENTERING,
+                    StrategyState.PROTECTING,
+                    StrategyState.OPEN,
+                },
+            )
+            self._persist()
+            return
+        self.clock.set_time_alert(
+            self.EXPOSURE_SYNC_TIMER,
+            self.clock.utc_now() + timedelta(milliseconds=1),
+            callback=lambda _: self._converge_protection(),
+            override=True,
+            allow_past=False,
+        )
 
     def _handle_protection_confirmation(self, client_order_id) -> None:
         if self._protective_order_id is None or client_order_id != self._protective_order_id:
@@ -256,8 +335,7 @@ class ShortBtcRsiStrategy(Strategy):
         if protected_qty != actual_qty:
             self._converge_protection()
         else:
-            if self.clock.next_time_ns(self.PROTECTION_TIMER) > 0:
-                self.clock.cancel_timer(self.PROTECTION_TIMER)
+            self._cancel_protection_timer()
             self._persist()
 
     def _on_protection_timeout(self, _) -> None:
@@ -272,11 +350,34 @@ class ShortBtcRsiStrategy(Strategy):
             return
         self._persist()
         for position in self._short_positions():
-            self.close_position(position, reduce_only=True, tags=[reason.value])
+            self._submit_close(position, reason.value)
 
     def _emergency_flatten(self) -> None:
         for position in self._short_positions():
-            self.close_position(position, reduce_only=True, tags=["emergency_exit"])
+            self._submit_close(position, "emergency_exit")
+
+    def _submit_close(self, position, reason: str) -> None:
+        order = self.order_factory.market(
+            instrument_id=position.instrument_id,
+            order_side=OrderSide.BUY,
+            quantity=position.quantity,
+            reduce_only=True,
+            tags=[reason],
+        )
+        self._exit_order_id = order.client_order_id
+        self._persist()
+        try:
+            self.submit_order(order, position_id=position.id)
+        except Exception as exc:  # noqa: BLE001 - fail closed across the framework boundary
+            try:
+                self._machine.recovery_required(
+                    f"exit submission failed: {exc}",
+                    allowed={StrategyState.EXITING, StrategyState.EMERGENCY_EXIT},
+                )
+            except InvalidTransition:
+                self._machine.mark_conflict(f"emergency exit submission failed: {exc}")
+            self._persist()
+            self.log.error("Exit submission failed; manual recovery required")
 
     def _short_positions(self):
         return [
@@ -314,11 +415,32 @@ class ShortBtcRsiStrategy(Strategy):
             self._entry_order_id = _client_order_id(journal.entry_order)
             self._exit_order_id = _client_order_id(journal.exit_order)
             self._protective_order_id = _client_order_id(journal.protective_order)
+        protected_qty, conflict = self._venue_protection_snapshot()
         snapshot = reconcile(
             journal,
-            ExchangeSnapshot(self._actual_short_qty(), self._accepted_protective_qty()),
+            ExchangeSnapshot(self._actual_short_qty(), protected_qty, conflict),
         )
         self._machine = StrategyStateMachine(snapshot)
+
+    def _venue_protection_snapshot(self) -> tuple[Decimal, str | None]:
+        trigger_types = {OrderType.STOP_MARKET, OrderType.MARKET_IF_TOUCHED}
+        protectors = [
+            order
+            for order in self.cache.orders_open(instrument_id=self.config.instrument_id)
+            if order.order_type in trigger_types
+            and order.side is OrderSide.BUY
+            and order.is_reduce_only
+        ]
+        if self._protective_order_id is None:
+            if protectors:
+                return Decimal(0), "open protective trigger exists without a journaled identity"
+            return Decimal(0), None
+        matching = [
+            order for order in protectors if order.client_order_id == self._protective_order_id
+        ]
+        if len(matching) != 1 or len(protectors) != 1:
+            return Decimal(0), "journaled protective trigger does not uniquely match venue orders"
+        return matching[0].quantity.as_decimal(), None
 
     def _persist(self) -> None:
         snapshot = self._machine.snapshot

@@ -49,3 +49,12 @@ def test_closed_strategy_cannot_reenter() -> None:
     machine.confirm_closed()
     with pytest.raises(InvalidTransition):
         machine.begin_entry()
+
+
+def test_failed_entry_submission_requires_manual_recovery() -> None:
+    machine = StrategyStateMachine()
+    machine.begin_entry()
+    snapshot = machine.recovery_required("synchronous submit failure")
+    assert snapshot.state is StrategyState.RECOVERY_REQUIRED
+    with pytest.raises(InvalidTransition):
+        machine.begin_entry()

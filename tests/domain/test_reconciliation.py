@@ -31,3 +31,16 @@ def test_restart_reconstructs_open_only_when_fully_protected() -> None:
     journal = RunRecord("run-1", StrategyState.OPEN)
     result = reconcile(journal, ExchangeSnapshot(Decimal("0.01"), Decimal("0.01")))
     assert result.state is StrategyState.OPEN
+
+
+def test_ambiguous_or_replaced_protection_is_never_silently_open() -> None:
+    journal = RunRecord("run-1", StrategyState.OPEN, protective_order="old-trigger")
+    result = reconcile(
+        journal,
+        ExchangeSnapshot(
+            Decimal("0.01"),
+            Decimal(0),
+            "journaled protective trigger does not uniquely match venue orders",
+        ),
+    )
+    assert result.state is StrategyState.STATE_CONFLICT

@@ -12,6 +12,7 @@ from .state_machine import StrategySnapshot, StrategyState
 class ExchangeSnapshot:
     net_short_qty: Decimal
     protected_qty: Decimal
+    protection_conflict: str | None = None
 
     def __post_init__(self) -> None:
         if self.net_short_qty < 0 or self.protected_qty < 0:
@@ -20,6 +21,13 @@ class ExchangeSnapshot:
 
 def reconcile(journal: RunRecord | None, exchange: ExchangeSnapshot) -> StrategySnapshot:
     """Exchange exposure wins; journal supplies run intent. Ambiguity fails closed."""
+    if exchange.protection_conflict is not None:
+        return StrategySnapshot(
+            StrategyState.STATE_CONFLICT,
+            exchange.net_short_qty,
+            exchange.protected_qty,
+            exchange.protection_conflict,
+        )
     if exchange.protected_qty > exchange.net_short_qty:
         return StrategySnapshot(
             StrategyState.STATE_CONFLICT,

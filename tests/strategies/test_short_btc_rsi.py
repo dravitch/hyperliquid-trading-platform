@@ -35,7 +35,8 @@ def test_adapter_is_pinned_to_installed_nautilus_version() -> None:
 def test_adapter_is_fail_closed_by_default() -> None:
     config = make_config()
     assert config.enable_order_submission is False
-    assert config.venue_margin_verified is False
+    assert config.margin_verification_path is None
+    assert config.account_address == ""
     assert config.notional_usdc == Decimal(300)
 
 

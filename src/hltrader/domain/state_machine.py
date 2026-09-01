@@ -105,6 +105,30 @@ class StrategyStateMachine:
             )
             return self._snapshot
 
+    def recovery_required(
+        self,
+        reason: str,
+        *,
+        allowed: set[StrategyState] | None = None,
+    ) -> StrategySnapshot:
+        """Fail closed when an orchestration command has an indeterminate outcome."""
+        with self._lock:
+            current = self._snapshot
+            permitted = allowed or {
+                StrategyState.ENTERING,
+                StrategyState.PROTECTING,
+                StrategyState.EXITING,
+            }
+            if current.state not in permitted:
+                raise InvalidTransition(f"cannot require recovery from {current.state}")
+            self._snapshot = StrategySnapshot(
+                StrategyState.RECOVERY_REQUIRED,
+                current.actual_net_position_qty,
+                current.protected_qty,
+                reason,
+            )
+            return self._snapshot
+
     def confirm_closed(self) -> StrategySnapshot:
         return self._transition(
             {StrategyState.EXITING, StrategyState.EMERGENCY_EXIT},

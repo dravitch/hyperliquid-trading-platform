@@ -21,7 +21,12 @@ from nautilus_trader.trading.config import StrategyConfig
 from nautilus_trader.trading.strategy import Strategy
 
 from hltrader.domain.exit_rules import ExitReason, PriceDirection, RsiExitRule
-from hltrader.domain.reconciliation import ExchangeSnapshot, reconcile
+from hltrader.domain.reconciliation import (
+    ExchangeSnapshot,
+    OpenExitOrder,
+    reconcile,
+    reconstruct_exit_outstanding,
+)
 from hltrader.domain.sizing import PositionSizing
 from hltrader.domain.state_machine import InvalidTransition, StrategyState, StrategyStateMachine
 from hltrader.indicators.rsi import RsiWarmupPolicy
@@ -80,9 +85,11 @@ class ShortBtcRsiStrategy(Strategy):
         self._entry_order_id = None
         self._protective_order_id = None
         self._exit_order_id = None
+        self._exit_order_ids: set[ClientOrderId] = set()
         self._exposure_sync_attempts = 0
         self._requested_protective_qty = Decimal(0)
         self._flatten_outstanding: dict[ClientOrderId, Decimal] = {}
+        self._restore_completed = False
 
     def on_start(self) -> None:
         self._instrument = self.cache.instrument(self.config.instrument_id)
@@ -133,6 +140,8 @@ class ShortBtcRsiStrategy(Strategy):
         if self._entry_order_id is not None and event.client_order_id == self._entry_order_id:
             if self._machine.snapshot.state is StrategyState.EMERGENCY_EXIT:
                 self._emergency_flatten()
+            elif self._machine.snapshot.state is StrategyState.EXITING:
+                self._converge_close()
             else:
                 self._converge_protection()
             return
@@ -144,6 +153,8 @@ class ShortBtcRsiStrategy(Strategy):
                 self._flatten_outstanding.pop(event.client_order_id, None)
             if self._machine.snapshot.state is StrategyState.EMERGENCY_EXIT:
                 self._emergency_flatten()
+            elif self._machine.snapshot.state is StrategyState.EXITING:
+                self._converge_close()
             return
         if (
             self._protective_order_id is not None
@@ -392,9 +403,14 @@ class ShortBtcRsiStrategy(Strategy):
             self._submit_close(position, reason.value)
 
     def _emergency_flatten(self) -> None:
+        self._converge_close()
+
+    def _converge_close(self) -> None:
         actual_qty = self._actual_short_qty()
-        self._machine.record_emergency_exposure(actual_qty)
+        self._machine.record_closing_exposure(actual_qty)
         if actual_qty == 0:
+            if not self._flatten_outstanding:
+                self._machine.confirm_closed(actual_qty)
             self._persist()
             return
         outstanding = sum(self._flatten_outstanding.values(), start=Decimal(0))
@@ -406,7 +422,12 @@ class ShortBtcRsiStrategy(Strategy):
         if not positions:
             self._persist()
             return
-        self._submit_close(positions[0], "emergency_exit", quantity=flatten_qty)
+        reason = (
+            "emergency_exit"
+            if self._machine.snapshot.state is StrategyState.EMERGENCY_EXIT
+            else self._machine.snapshot.exit_reason or "exit"
+        )
+        self._submit_close(positions[0], reason, quantity=flatten_qty)
 
     def _submit_close(self, position, reason: str, *, quantity: Decimal | None = None) -> None:
         order_quantity = (
@@ -420,8 +441,8 @@ class ShortBtcRsiStrategy(Strategy):
             tags=[reason],
         )
         self._exit_order_id = order.client_order_id
-        if reason == "emergency_exit":
-            self._flatten_outstanding[order.client_order_id] = order_quantity.as_decimal()
+        self._exit_order_ids.add(order.client_order_id)
+        self._flatten_outstanding[order.client_order_id] = order_quantity.as_decimal()
         self._persist()
         try:
             self.submit_order(order, position_id=position.id)
@@ -468,17 +489,58 @@ class ShortBtcRsiStrategy(Strategy):
         return order.quantity.as_decimal() if order.status in accepted_statuses else Decimal(0)
 
     def _restore_state(self) -> None:
+        if self._restore_completed:
+            return
+        self._restore_completed = True
         journal = self._journal.load()
         if journal is not None:
             self._entry_order_id = _client_order_id(journal.entry_order)
             self._exit_order_id = _client_order_id(journal.exit_order)
+            self._exit_order_ids = {
+                ClientOrderId(order_id) for order_id in journal.exit_orders
+            }
+            if self._exit_order_id is not None:
+                self._exit_order_ids.add(self._exit_order_id)
             self._protective_order_id = _client_order_id(journal.protective_order)
         protected_qty, conflict = self._venue_protection_snapshot()
+        self._flatten_outstanding, exit_conflict = self._venue_exit_snapshot()
         snapshot = reconcile(
             journal,
-            ExchangeSnapshot(self._actual_short_qty(), protected_qty, conflict),
+            ExchangeSnapshot(
+                self._actual_short_qty(),
+                protected_qty,
+                conflict,
+                sum(self._flatten_outstanding.values(), start=Decimal(0)),
+                exit_conflict,
+            ),
         )
         self._machine = StrategyStateMachine(snapshot)
+        if snapshot.state in {StrategyState.EXITING, StrategyState.EMERGENCY_EXIT}:
+            self._converge_close()
+        elif snapshot.state is StrategyState.PROTECTING:
+            self._converge_protection()
+        elif snapshot.state is StrategyState.CLOSED_FINAL:
+            self._persist()
+
+    def _venue_exit_snapshot(self) -> tuple[dict[ClientOrderId, Decimal], str | None]:
+        trigger_types = {OrderType.STOP_MARKET, OrderType.MARKET_IF_TOUCHED}
+        exits = [
+            order
+            for order in self.cache.orders_open(instrument_id=self.config.instrument_id)
+            if order.order_type not in trigger_types
+            and order.side is OrderSide.BUY
+            and order.is_reduce_only
+        ]
+        outstanding, conflict = reconstruct_exit_outstanding(
+            {str(order_id) for order_id in self._exit_order_ids},
+            tuple(
+                OpenExitOrder(str(order.client_order_id), order.leaves_qty.as_decimal())
+                for order in exits
+            ),
+        )
+        return {
+            ClientOrderId(order_id): quantity for order_id, quantity in outstanding.items()
+        }, conflict
 
     def _venue_protection_snapshot(self) -> tuple[Decimal, str | None]:
         trigger_types = {OrderType.STOP_MARKET, OrderType.MARKET_IF_TOUCHED}
@@ -513,6 +575,7 @@ class ShortBtcRsiStrategy(Strategy):
                 protective_order=(
                     str(self._protective_order_id) if self._protective_order_id else None
                 ),
+                exit_orders=tuple(sorted(str(order_id) for order_id in self._exit_order_ids)),
             )
         )
 

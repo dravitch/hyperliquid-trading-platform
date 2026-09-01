@@ -10,6 +10,7 @@ from nautilus_trader.trading.strategy import Strategy
 
 from hltrader.domain.exit_rules import PriceDirection
 from hltrader.domain.state_machine import StrategyState
+from hltrader.persistence.run_journal import RunRecord
 from hltrader.strategies.short_btc_rsi import (
     ShortBtcRsiConfig,
     ShortBtcRsiStrategy,
@@ -202,3 +203,169 @@ def test_position_closed_event_cannot_close_while_exposure_remains(monkeypatch) 
 
     assert strategy._machine.snapshot.state is StrategyState.EMERGENCY_EXIT
     assert flatten_calls == [True]
+
+
+def _arrange_restart(
+    monkeypatch,
+    *,
+    state: StrategyState,
+    actual: str,
+    outstanding: str = "0",
+    protected: str = "0",
+    protection_conflict: str | None = None,
+    exit_conflict: str | None = None,
+):
+    strategy = ShortBtcRsiStrategy(make_config())
+    journal = RunRecord(
+        "run-1",
+        state,
+        exit_order="X-1" if outstanding != "0" else None,
+        exit_reason="trigger rejected" if state is StrategyState.EMERGENCY_EXIT else "rsi",
+        protective_order="P-1" if protected != "0" else None,
+        exit_orders=("X-1",) if outstanding != "0" else (),
+    )
+    outstanding_map = (
+        {ClientOrderId("X-1"): Decimal(outstanding)} if outstanding != "0" else {}
+    )
+    submissions = []
+    persisted = []
+    position = SimpleNamespace()
+    monkeypatch.setattr(strategy._journal, "load", lambda: journal)
+    monkeypatch.setattr(
+        strategy,
+        "_venue_protection_snapshot",
+        lambda: (Decimal(protected), protection_conflict),
+    )
+    monkeypatch.setattr(
+        strategy,
+        "_venue_exit_snapshot",
+        lambda: (dict(outstanding_map), exit_conflict),
+    )
+    monkeypatch.setattr(strategy, "_actual_short_qty", lambda: Decimal(actual))
+    monkeypatch.setattr(
+        strategy,
+        "_short_positions",
+        lambda: [position] if Decimal(actual) > 0 else [],
+    )
+    monkeypatch.setattr(strategy, "_persist", lambda: persisted.append(strategy._machine.snapshot))
+
+    def submit(position_arg, reason, *, quantity=None):
+        submissions.append((position_arg, reason, quantity))
+        strategy._flatten_outstanding[ClientOrderId("X-new")] = quantity
+
+    monkeypatch.setattr(strategy, "_submit_close", submit)
+    return strategy, submissions, persisted
+
+
+def test_restart_emergency_with_pending_flatten_does_not_duplicate(monkeypatch) -> None:
+    strategy, submissions, _ = _arrange_restart(
+        monkeypatch,
+        state=StrategyState.EMERGENCY_EXIT,
+        actual="0.006",
+        outstanding="0.006",
+    )
+    strategy._restore_state()
+    assert strategy._machine.snapshot.state is StrategyState.EMERGENCY_EXIT
+    assert strategy._flatten_outstanding == {ClientOrderId("X-1"): Decimal("0.006")}
+    assert submissions == []
+
+
+def test_restart_partial_flatten_uses_open_leaves_quantity(monkeypatch) -> None:
+    strategy, submissions, _ = _arrange_restart(
+        monkeypatch,
+        state=StrategyState.EMERGENCY_EXIT,
+        actual="0.004",
+        outstanding="0.004",
+    )
+    strategy._restore_state()
+    assert strategy._machine.snapshot.actual_net_position_qty == Decimal("0.004")
+    assert strategy._flatten_outstanding[ClientOrderId("X-1")] == Decimal("0.004")
+    assert submissions == []
+
+
+def test_restart_missing_flatten_submits_exact_shortfall_once(monkeypatch) -> None:
+    strategy, submissions, _ = _arrange_restart(
+        monkeypatch,
+        state=StrategyState.EMERGENCY_EXIT,
+        actual="0.004",
+    )
+    strategy._restore_state()
+    strategy._restore_state()
+    assert [(reason, qty) for _, reason, qty in submissions] == [
+        ("emergency_exit", Decimal("0.004"))
+    ]
+
+
+def test_restart_ambiguous_reduce_only_exit_fails_closed_without_submission(monkeypatch) -> None:
+    strategy, submissions, _ = _arrange_restart(
+        monkeypatch,
+        state=StrategyState.EMERGENCY_EXIT,
+        actual="0.004",
+        exit_conflict="open reduce-only exit cannot be uniquely attributed to this run",
+    )
+    strategy._restore_state()
+    assert strategy._machine.snapshot.state is StrategyState.STATE_CONFLICT
+    assert submissions == []
+
+
+def test_restart_partial_protection_never_reconstructs_open(monkeypatch) -> None:
+    strategy, submissions, _ = _arrange_restart(
+        monkeypatch,
+        state=StrategyState.PROTECTING,
+        actual="0.006",
+        protected="0.003",
+    )
+    convergences = []
+    monkeypatch.setattr(strategy, "_converge_protection", lambda: convergences.append(True))
+    strategy._restore_state()
+    assert strategy._machine.snapshot.state is StrategyState.PROTECTING
+    assert convergences == [True]
+    assert submissions == []
+
+
+def test_restart_exact_protection_reconstructs_open(monkeypatch) -> None:
+    strategy, submissions, _ = _arrange_restart(
+        monkeypatch,
+        state=StrategyState.PROTECTING,
+        actual="0.006",
+        protected="0.006",
+    )
+    strategy._restore_state()
+    assert strategy._machine.snapshot.state is StrategyState.OPEN
+    assert submissions == []
+
+
+def test_restart_missing_journaled_protector_fails_closed(monkeypatch) -> None:
+    strategy, submissions, _ = _arrange_restart(
+        monkeypatch,
+        state=StrategyState.PROTECTING,
+        actual="0.006",
+        protection_conflict="journaled protective trigger does not uniquely match venue orders",
+    )
+    strategy._restore_state()
+    assert strategy._machine.snapshot.state is StrategyState.STATE_CONFLICT
+    assert submissions == []
+
+
+def test_restart_exiting_with_covered_shortfall_does_not_duplicate(monkeypatch) -> None:
+    strategy, submissions, _ = _arrange_restart(
+        monkeypatch,
+        state=StrategyState.EXITING,
+        actual="0.004",
+        outstanding="0.004",
+    )
+    strategy._restore_state()
+    assert strategy._machine.snapshot.state is StrategyState.EXITING
+    assert submissions == []
+
+
+def test_restart_after_economic_close_persists_closed_final(monkeypatch) -> None:
+    strategy, submissions, persisted = _arrange_restart(
+        monkeypatch,
+        state=StrategyState.EMERGENCY_EXIT,
+        actual="0",
+    )
+    strategy._restore_state()
+    assert strategy._machine.snapshot.state is StrategyState.CLOSED_FINAL
+    assert persisted[-1].state is StrategyState.CLOSED_FINAL
+    assert submissions == []

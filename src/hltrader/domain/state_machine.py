@@ -125,6 +125,22 @@ class StrategyStateMachine:
             )
             return self._snapshot
 
+    def record_closing_exposure(self, actual_qty: Decimal) -> StrategySnapshot:
+        """Refresh venue exposure without losing an existing close intent."""
+        if actual_qty < 0:
+            raise ValueError("actual closing exposure cannot be negative")
+        with self._lock:
+            current = self._snapshot
+            if current.state not in {StrategyState.EXITING, StrategyState.EMERGENCY_EXIT}:
+                raise InvalidTransition(f"cannot record closing exposure from {current.state}")
+            self._snapshot = StrategySnapshot(
+                current.state,
+                actual_qty,
+                min(current.protected_qty, actual_qty),
+                current.exit_reason,
+            )
+            return self._snapshot
+
     def recovery_required(
         self,
         reason: str,

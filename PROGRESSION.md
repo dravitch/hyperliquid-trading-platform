@@ -50,7 +50,7 @@ demeure explicitement désactivé dans la configuration.
 
 ### Tests et qualité
 
-- 57 tests déterministes et d'intégration réussis.
+- 76 tests déterministes et d'intégration réussis.
 - Scénarios couverts : seuils inclusifs, sizing, partial fills, double signal concurrent,
   protection rejetée, absence de réentrée, redémarrage, conflits journal/exchange, journal
   corrompu et désaccord de marge ou de levier.
@@ -126,6 +126,32 @@ du levier ou du mode de marge. Les deux derniers résultats bloqueront l'entrée
 - Les 24 permutations de fill, acceptation, timeout et rejet conservent l'invariant : jamais
   `OPEN` lorsque `protected_qty < actual_net_position_qty`.
 - ADR 0003 ajouté pour documenter les quatre écarts architecturaux découverts avant correction.
+
+### Restart et réconciliation venue-first — jalon 4
+
+- L'intention `EXITING`, `EMERGENCY_EXIT` ou `RECOVERY_REQUIRED` survit désormais au restart au
+  lieu d'être réduite implicitement à `OPEN` ou `PROTECTING`.
+- Le journal persiste tous les identifiants d'ordres de sortie du run, avec migration transparente
+  de l'ancien champ unique `exit_order`; aucune quantité économique persistée n'est crue au
+  restart.
+- L'outstanding flatten est reconstruit depuis les ordres BUY reduce-only réellement ouverts et
+  leur `leaves_qty`, uniquement lorsque leur identité appartient sans ambiguïté au run.
+- Le shortfall est calculé comme exposition short réelle moins quantité de sortie ouverte
+  reconnue. Un ordre manquant reprend automatiquement exactement ce shortfall lorsqu'une intention
+  `EXITING` ou `EMERGENCY_EXIT` est déjà journalisée.
+- Tout ordre reduce-only étranger, toute identité ambiguë et tout outstanding supérieur à
+  l'exposition produit `STATE_CONFLICT` sans nouvelle soumission.
+- Une protection exacte peut reconstruire `OPEN`; une protection partielle reste `PROTECTING` et
+  reprend la convergence; un trigger journalisé absent échoue fermé.
+- Une exposition nulle avec une fermeture journalisée et aucune sortie pertinente ouverte produit
+  et persiste `CLOSED_FINAL`; `RECOVERY_REQUIRED` n'est pas effacé sur la seule foi d'une position
+  nulle.
+- Deux restaurations successives de la même instance sont idempotentes.
+- ADR 0004 documente la divergence initiale et la politique de reprise automatique limitée aux
+  intentions de fermeture déjà persistées.
+- Dix-neuf nouveaux tests couvrent pending/partial/missing flatten, EXITING, protection exacte ou
+  partielle, trigger absent, ordres ambigus, journal stale, clôture économique et migration du
+  journal.
 
 ### Revue adversariale AGORA — jalon 2
 
@@ -229,10 +255,9 @@ sur ce dépôt devront donc employer explicitement `id_ed25519_dravitch`, ou une
 
 ## Prochaines étapes
 
-1. Étendre les tests de restart et réconciliation journal/cache/exposition.
-2. Ajouter le venue verifier public ternaire du mode de marge/levier.
-3. Câbler un runner testnet fail-closed, maintenu désactivé sans agent et sans secrets.
-4. Avant tout testnet, confirmer la direction du seuil de 60 000 USD, le notional de 300 USDC et
+1. Ajouter le venue verifier public ternaire `VERIFIED | MISMATCH | UNVERIFIABLE`.
+2. Câbler un runner testnet fail-closed, maintenu désactivé sans agent et sans secrets.
+3. Avant tout testnet, confirmer la direction du seuil de 60 000 USD, le notional de 300 USDC et
    le mode de marge isolée.
 
 ## Décisions et blocages ouverts

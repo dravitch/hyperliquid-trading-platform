@@ -25,3 +25,12 @@ def test_corrupt_journal_fails_closed(tmp_path: Path) -> None:
     path.write_text("not-json", encoding="utf-8")
     with pytest.raises(JournalError):
         RunJournal(path).load()
+
+
+def test_legacy_single_exit_identity_is_migrated_on_load(tmp_path: Path) -> None:
+    path = tmp_path / "run.json"
+    path.write_text(
+        '{"run_id":"run-1","state":"EXITING","exit_order":"exit-1"}',
+        encoding="utf-8",
+    )
+    assert RunJournal(path).load().exit_orders == ("exit-1",)

@@ -22,17 +22,29 @@ class RunRecord:
     exit_order: str | None = None
     exit_reason: str | None = None
     protective_order: str | None = None
+    exit_orders: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> RunRecord:
         try:
+            exit_order = value.get("exit_order")
+            raw_exit_orders = value.get("exit_orders")
+            if raw_exit_orders is None:
+                exit_orders = (str(exit_order),) if exit_order is not None else ()
+            elif isinstance(raw_exit_orders, list) and all(
+                isinstance(order_id, str) for order_id in raw_exit_orders
+            ):
+                exit_orders = tuple(raw_exit_orders)
+            else:
+                raise TypeError("exit_orders must be a list of strings")
             return cls(
                 run_id=str(value["run_id"]),
                 state=StrategyState(value["state"]),
                 entry_order=value.get("entry_order"),
-                exit_order=value.get("exit_order"),
+                exit_order=exit_order,
                 exit_reason=value.get("exit_reason"),
                 protective_order=value.get("protective_order"),
+                exit_orders=exit_orders,
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise JournalError("invalid run journal") from exc
@@ -58,6 +70,7 @@ class RunJournal:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = asdict(record)
         payload["state"] = record.state.value
+        payload["exit_orders"] = list(record.exit_orders)
         temporary_path: Path | None = None
         try:
             with NamedTemporaryFile(

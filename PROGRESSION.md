@@ -111,6 +111,23 @@ Corrections issues de la revue :
 Le test moteur démontre que le cache position est mis à jour avant `on_order_filled` dans le
 backtest déterministe. Cette preuve ne s'étend pas au moteur live.
 
+### Configuration locale des identités Hyperliquid
+
+- Création d'un `.env` local ignoré par Git, permissions Unix `600`.
+- Séparation explicite entre adresse du compte principal, adresse publique de l'agent et clé
+  privée de l'agent.
+- Adresse publique candidate du compte principal conservée sans l'activer :
+  `0x4c017d1f234F331ba4cc0ad6A356fa325c252299`.
+- Adresse publique de l'agent documentée :
+  `0x31d4bec9c5194177096fabb278d781327579459d`.
+- Les clés privées testnet et mainnet restent vides.
+- Verrou `HLTRADER_MAINNET_ENABLED=false` ajouté au modèle de configuration.
+- `.env.example` enrichi sans valeur propre à l'opérateur.
+
+L'adresse candidate contient 40 caractères hexadécimaux après `0x` : c'est une adresse publique,
+pas une clé privée. `HYPERLIQUID_ACCOUNT_ADDRESS` reste vide jusqu'à confirmation de l'adresse
+MetaMask qui a signé `ApproveAgent`.
+
 Commande de validation :
 
 ```bash

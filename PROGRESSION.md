@@ -116,17 +116,25 @@ backtest déterministe. Cette preuve ne s'étend pas au moteur live.
 - Création d'un `.env` local ignoré par Git, permissions Unix `600`.
 - Séparation explicite entre adresse du compte principal, adresse publique de l'agent et clé
   privée de l'agent.
-- Adresse publique candidate du compte principal conservée sans l'activer :
+- API wallet nommé `Nautilus` confirmé avec l'adresse publique
   `0x4c017d1f234F331ba4cc0ad6A356fa325c252299`.
-- Adresse publique de l'agent documentée :
-  `0x31d4bec9c5194177096fabb278d781327579459d`.
+- L'adresse `0x31d4bec9c5194177096fabb278d781327579459d`, issue d'une tentative précédente
+  d'`ApproveAgent`, est retirée de la configuration active.
 - Les clés privées testnet et mainnet restent vides.
 - Verrou `HLTRADER_MAINNET_ENABLED=false` ajouté au modèle de configuration.
 - `.env.example` enrichi sans valeur propre à l'opérateur.
 
-L'adresse candidate contient 40 caractères hexadécimaux après `0x` : c'est une adresse publique,
-pas une clé privée. `HYPERLIQUID_ACCOUNT_ADDRESS` reste vide jusqu'à confirmation de l'adresse
-MetaMask qui a signé `ApproveAgent`.
+L'adresse API contient 40 caractères hexadécimaux après `0x` : c'est une adresse publique, pas une
+clé privée. `HYPERLIQUID_ACCOUNT_ADDRESS` reste vide jusqu'à confirmation de l'adresse MetaMask
+qui a signé `ApproveAgent`.
+
+Le payload final `ApproveAgent` confirme `Nautilus valid_until 1803791713367`, soit une expiration
+le 28 février 2027 à 05:15:13 UTC. La durée entre le nonce d'approbation et l'expiration est
+d'environ 180 jours. Ces horodatages publics sont conservés dans le `.env` local pour audit.
+
+Le dépôt d'activation doit créditer le compte principal Hyperliquid contrôlé par MetaMask, jamais
+l'adresse publique de l'API wallet. L'agent sert à signer; le compte principal reste la source de
+vérité pour soldes, positions, ordres et événements utilisateur.
 
 Commande de validation :
 

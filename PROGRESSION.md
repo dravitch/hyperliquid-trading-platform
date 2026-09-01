@@ -50,7 +50,7 @@ demeure explicitement désactivé dans la configuration.
 
 ### Tests et qualité
 
-- 76 tests déterministes et d'intégration réussis.
+- 98 tests déterministes et d'intégration réussis.
 - Scénarios couverts : seuils inclusifs, sizing, partial fills, double signal concurrent,
   protection rejetée, absence de réentrée, redémarrage, conflits journal/exchange, journal
   corrompu et désaccord de marge ou de levier.
@@ -152,6 +152,27 @@ du levier ou du mode de marge. Les deux derniers résultats bloqueront l'entrée
 - Dix-neuf nouveaux tests couvrent pending/partial/missing flatten, EXITING, protection exacte ou
   partielle, trigger absent, ordres ambigus, journal stale, clôture économique et migration du
   journal.
+
+### Venue verifier ternaire — jalon 5
+
+- Verifier public read-only séparé en transport `clearinghouseState`, parsing strict des preuves,
+  classification pure et sérialisation du reçu consommable par la stratégie.
+- Statuts explicites `VERIFIED`, `MISMATCH` et `UNVERIFIABLE`; seul `VERIFIED` satisfait le garde
+  d'entrée existant de `ShortBtcRsiStrategy`.
+- Preuves utilisées uniquement lorsqu'une position unique expose `coin`, `szi`,
+  `leverage.type` et `leverage.value`; les nombres non finis, non positifs ou un levier non entier
+  échouent fermés.
+- Absence de position, champ manquant, réponse ambiguë, parsing invalide, erreur réseau, preuve
+  stale ou future : `UNVERIFIABLE`, jamais succès implicite.
+- Mode de marge ou levier observable différent, ainsi que contexte compte/environnement/instrument
+  différent : `MISMATCH`.
+- Le reçu lie valeurs attendues et observées, quantité de position, source, horodatage et raison;
+  son aller-retour JSON conserve le contrat consommé par `_margin_is_verified()`.
+- ADR 0005 documente la limite réelle de l'API : l'adresse et l'environnement sont liés à la
+  requête mais non répétés dans la réponse, et aucun réglage préalable n'est observable sans
+  position pertinente.
+- 22 nouveaux tests couvrent les classifications, parsing, erreurs transport, fraîcheur,
+  déterminisme, contexte et consommation du reçu.
 
 ### Revue adversariale AGORA — jalon 2
 
@@ -255,8 +276,9 @@ sur ce dépôt devront donc employer explicitement `id_ed25519_dravitch`, ou une
 
 ## Prochaines étapes
 
-1. Ajouter le venue verifier public ternaire `VERIFIED | MISMATCH | UNVERIFIABLE`.
-2. Câbler un runner testnet fail-closed, maintenu désactivé sans agent et sans secrets.
+1. Résoudre explicitement le bootstrap fail-closed : `clearinghouseState` ne prouve pas le mode de
+   marge ni le levier BTC tant qu'aucune position BTC n'existe.
+2. Câbler ensuite un runner testnet fail-closed, maintenu désactivé sans agent et sans secrets.
 3. Avant tout testnet, confirmer la direction du seuil de 60 000 USD, le notional de 300 USDC et
    le mode de marge isolée.
 
@@ -266,8 +288,9 @@ sur ce dépôt devront donc employer explicitement `id_ed25519_dravitch`, ou une
 - Notional : 300 USDC est une valeur provisoire à confirmer.
 - NautilusTrader est installé et épinglé, mais le runner live/testnet n'est pas encore câblé.
 - L'API standard de stratégie ne prouve pas le mode de marge et le levier Hyperliquid. Le booléen
-  de confiance a été supprimé; l'entrée exige un reçu structuré que seul le futur vérificateur
-  venue pourra produire.
+  de confiance a été supprimé. Le verifier public produit un reçu structuré, mais ne peut le
+  classer `VERIFIED` qu'en présence d'une position qui expose réellement ces deux valeurs. Le
+  premier entry reste donc bloqué jusqu'à résolution explicite de ce bootstrap.
 - Verdict AGORA `NUANCED` : aucune autorisation de runner testnet tant que les risques blocants du
   rapport de revue ne sont pas clos.
 - Aucun secret Hyperliquid n'a été configuré et aucune connexion à la venue n'a été effectuée.

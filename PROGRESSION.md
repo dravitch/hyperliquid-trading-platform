@@ -85,6 +85,15 @@ Le tag officiel NautilusTrader `v1.231.0` a été inspecté. L'adapter reconnaî
 fenêtre d'exposition non protégée subsiste donc. Cette conclusion et ses conséquences sont
 consignées dans `docs/decisions/0002-hyperliquid-normal-tpsl-v1.231.0.md`.
 
+La règle de déclenchement venue est désormais classée `DOCUMENTED_CONFIRMED` : les documentations
+officielles Hyperliquid et NautilusTrader indiquent que les TP/SL et ordres conditionnels natifs
+sont évalués contre le mark price. Deux preuves restent distinctement ouvertes : la fidélité de
+notre `BacktestEngine` à cette sémantique et le lifecycle réel Nautilus/Hyperliquid sur testnet.
+
+Le futur venue verifier public adoptera un reçu ternaire `VERIFIED`, `MISMATCH` ou
+`UNVERIFIABLE`. L'absence de position BTC ne sera jamais interprétée comme une preuve de conformité
+du levier ou du mode de marge. Les deux derniers résultats bloqueront l'entrée.
+
 ### Revue adversariale AGORA — jalon 2
 
 - Revue réelle exécutée dans `/home/andrei/Projects/61_AGORA`.
@@ -187,12 +196,13 @@ sur ce dépôt devront donc employer explicitement `id_ed25519_dravitch`, ou une
 
 ## Prochaines étapes
 
-1. Ajouter le runner de vérification directe du mode de marge/levier côté Hyperliquid qui produit
-   le reçu structuré exigé par l'adapter.
-2. Ajouter des tests d'intégration Nautilus avec événements de fills successifs et timeout/rejet
-   concurrents.
-3. Implémenter le runner de backtest et vérifier la sémantique mark-price du trigger.
-4. Avant tout testnet, confirmer la direction du seuil de 60 000 USD, le notional de 300 USDC et
+1. Implémenter le runner `BacktestEngine` et démontrer la sémantique mark-price du trigger.
+2. Ajouter des tests d'intégration Nautilus avec fills successifs, acceptation différée et
+   timeout/rejet concurrents.
+3. Étendre les tests de restart et réconciliation journal/cache/exposition.
+4. Ajouter le venue verifier public ternaire du mode de marge/levier.
+5. Câbler un runner testnet fail-closed, maintenu désactivé sans agent et sans secrets.
+6. Avant tout testnet, confirmer la direction du seuil de 60 000 USD, le notional de 300 USDC et
    le mode de marge isolée.
 
 ## Décisions et blocages ouverts

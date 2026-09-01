@@ -155,6 +155,14 @@ signature.
 - Adresse d'agent obligatoirement distincte et secrets exclus de KBM et de Git.
 - `HLTRADER_MAINNET_ENABLED=false` demeure obligatoire après cette activation administrative.
 
+### Présentation HNT dans KBM
+
+- Article `KB-HOME-HYPERLIQUID-002` ajouté sous `Corpus > HOME > Hyperliquid`.
+- Vue d'ensemble documentée : vision, MVP, architecture, sorties, machine à états, limites de
+  `normalTpsl`, garde-fous, état courant et prochaines étapes.
+- Le document indique explicitement qu'aucun ordre testnet ou mainnet n'a encore été soumis et
+  que les runners demeurent bloqués.
+
 Commande de validation :
 
 ```bash

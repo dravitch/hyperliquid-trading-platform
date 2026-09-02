@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -32,6 +32,7 @@ from hltrader.domain.state_machine import InvalidTransition, StrategyState, Stra
 from hltrader.indicators.rsi import RsiWarmupPolicy
 from hltrader.orchestration.submission import submit_entry_safely, submit_protection_safely
 from hltrader.persistence.run_journal import RunJournal, RunRecord
+from hltrader.risk.bootstrap_margin import BootstrapExpectation, consume_bootstrap_receipt
 from hltrader.risk.guard import MarginMode
 from hltrader.risk.margin_verification import MarginVerificationError, load_margin_verification
 
@@ -55,6 +56,11 @@ class ShortBtcRsiConfig(StrategyConfig, frozen=True):
     desired_leverage: Decimal = Decimal(3)
     margin_verification_path: str | None = None
     margin_verification_max_age_secs: int = 300
+    bootstrap_margin_receipt_path: str | None = None
+    bootstrap_margin_max_age_secs: int = 30
+    bootstrap_signer_address: str = ""
+    bootstrap_coin: str = "BTC"
+    bootstrap_asset: int = 0
     protection_timeout_secs: int = 10
 
 
@@ -90,6 +96,7 @@ class ShortBtcRsiStrategy(Strategy):
         self._requested_protective_qty = Decimal(0)
         self._flatten_outstanding: dict[ClientOrderId, Decimal] = {}
         self._restore_completed = False
+        self._bootstrap_session_id = str(uuid4())
 
     def on_start(self) -> None:
         self._instrument = self.cache.instrument(self.config.instrument_id)
@@ -224,10 +231,6 @@ class ShortBtcRsiStrategy(Strategy):
         if not self.config.enable_order_submission:
             self.log.warning("Order submission disabled by configuration")
             return
-        if not self._margin_is_verified():
-            self.log.error("Entry blocked: no matching fresh venue margin verification receipt")
-            return
-
         quote = self.cache.quote_tick(self.config.instrument_id)
         if quote is None:
             self.log.error("Entry blocked: no quote available for market-order pricing")
@@ -242,6 +245,9 @@ class ShortBtcRsiStrategy(Strategy):
             order_side=OrderSide.SELL,
             quantity=self._instrument.make_qty(quantity),
         )
+        if not self._margin_authorizes_entry(str(order.client_order_id)):
+            self.log.error("Entry blocked: no matching fresh margin authorization receipt")
+            return
         self._machine.begin_entry()
         self._entry_order_id = order.client_order_id
         self._persist()
@@ -268,6 +274,34 @@ class ShortBtcRsiStrategy(Strategy):
             leverage=self.config.desired_leverage,
             now=self.clock.utc_now(),
             max_age_seconds=self.config.margin_verification_max_age_secs,
+        )
+
+    def _margin_authorizes_entry(self, entry_id: str, *, now: datetime | None = None) -> bool:
+        if self._margin_is_verified():
+            return True
+        if (
+            self.config.environment != "testnet"
+            or not self.config.bootstrap_margin_receipt_path
+            or not self.config.bootstrap_signer_address
+        ):
+            return False
+        expectation = BootstrapExpectation(
+            session_id=self._bootstrap_session_id,
+            account_address=self.config.account_address,
+            signer_address=self.config.bootstrap_signer_address,
+            environment=self.config.environment,
+            instrument_id=str(self.config.instrument_id),
+            coin=self.config.bootstrap_coin,
+            asset=self.config.bootstrap_asset,
+            margin_mode=self.config.desired_margin_mode,
+            leverage=self.config.desired_leverage,
+        )
+        return consume_bootstrap_receipt(
+            Path(self.config.bootstrap_margin_receipt_path),
+            expectation,
+            now=now or self.clock.utc_now(),
+            max_age_seconds=self.config.bootstrap_margin_max_age_secs,
+            entry_id=entry_id,
         )
 
     def _converge_protection(self) -> None:

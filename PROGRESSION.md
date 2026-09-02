@@ -50,7 +50,7 @@ demeure explicitement désactivé dans la configuration.
 
 ### Tests et qualité
 
-- 98 tests déterministes et d'intégration réussis.
+- 120 tests déterministes et d'intégration réussis.
 - Scénarios couverts : seuils inclusifs, sizing, partial fills, double signal concurrent,
   protection rejetée, absence de réentrée, redémarrage, conflits journal/exchange, journal
   corrompu et désaccord de marge ou de levier.
@@ -174,6 +174,34 @@ du levier ou du mode de marge. Les deux derniers résultats bloqueront l'entrée
 - 22 nouveaux tests couvrent les classifications, parsing, erreurs transport, fraîcheur,
   déterminisme, contexte et consommation du reçu.
 
+### Bootstrap marge/levier one-shot — jalon 6
+
+- Spike documentaire réalisé sur l'endpoint `exchange`, le SDK Python officiel et l'adapter
+  NautilusTrader : l'action exacte est `updateLeverage` avec `asset`, `isCross` et un `leverage`
+  entier.
+- La réponse positive exacte `status=ok` / `response.type=default` arrive, selon la documentation
+  Hyperliquid, après inclusion dans un bloc L1 committé et exécution de l'action. Elle prouve
+  l'acceptation de la commande, pas un état pré-position relisible.
+- Contrat séparé `BootstrapMarginReceipt` avec `CONFIGURED`, `MISMATCH` et `UNVERIFIABLE`; le sens
+  du reçu public `MarginVerificationReceipt` reste inchangé.
+- Binding exact du compte master, signer agent, environnement, session de processus,
+  instrument/coin, index d'asset, mode cross/isolated, levier, nonce et type de réponse.
+- Consommation atomique one-shot sous verrou de fichier pour un `client_order_id` précis,
+  immédiatement avant la persistance de `ENTERING`; deux consommations concurrentes ne peuvent
+  pas gagner.
+- Politique restart fail-closed : une nouvelle session ne peut consommer un reçu créé pour la
+  session précédente, même s'il n'avait pas encore été utilisé. Un reçu consommé n'est jamais
+  réutilisable.
+- Timeout, perte réseau ou réponse malformée restent `UNVERIFIABLE`; aucun retry automatique de
+  mutation n'est introduit.
+- L'intégration minimale du garde d'entrée accepte soit la preuve publique existante, soit la
+  consommation réussie d'un bootstrap receipt. Les valeurs par défaut restent entièrement
+  désactivées.
+- ADR 0006 documente signature agent/master, sémantique de réponse, limites de relecture et
+  politique de crash/restart.
+- 22 nouveaux tests couvrent payload officiel, succès exact, mauvais mode/levier/contexte,
+  rejet, ambiguïté réseau, réponse malformée, fraîcheur, concurrence, one-shot et restart.
+
 ### Revue adversariale AGORA — jalon 2
 
 - Revue réelle exécutée dans `/home/andrei/Projects/61_AGORA`.
@@ -276,8 +304,8 @@ sur ce dépôt devront donc employer explicitement `id_ed25519_dravitch`, ou une
 
 ## Prochaines étapes
 
-1. Résoudre explicitement le bootstrap fail-closed : `clearinghouseState` ne prouve pas le mode de
-   marge ni le levier BTC tant qu'aucune position BTC n'existe.
+1. Réaliser un spike testnet contrôlé de la seule mutation `updateLeverage` sur compte plat afin
+   de confirmer empiriquement son acceptation par l'agent et son comportement pré-position.
 2. Câbler ensuite un runner testnet fail-closed, maintenu désactivé sans agent et sans secrets.
 3. Avant tout testnet, confirmer la direction du seuil de 60 000 USD, le notional de 300 USDC et
    le mode de marge isolée.
@@ -290,7 +318,8 @@ sur ce dépôt devront donc employer explicitement `id_ed25519_dravitch`, ou une
 - L'API standard de stratégie ne prouve pas le mode de marge et le levier Hyperliquid. Le booléen
   de confiance a été supprimé. Le verifier public produit un reçu structuré, mais ne peut le
   classer `VERIFIED` qu'en présence d'une position qui expose réellement ces deux valeurs. Le
-  premier entry reste donc bloqué jusqu'à résolution explicite de ce bootstrap.
+  bootstrap séparé peut autoriser une première entrée uniquement après réponse L1 positive exacte;
+  la génération signée de ce reçu reste désactivée jusqu'au spike testnet contrôlé.
 - Verdict AGORA `NUANCED` : aucune autorisation de runner testnet tant que les risques blocants du
   rapport de revue ne sont pas clos.
 - Aucun secret Hyperliquid n'a été configuré et aucune connexion à la venue n'a été effectuée.

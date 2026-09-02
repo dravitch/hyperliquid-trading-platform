@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -11,6 +12,13 @@ from nautilus_trader.trading.strategy import Strategy
 from hltrader.domain.exit_rules import PriceDirection
 from hltrader.domain.state_machine import StrategyState
 from hltrader.persistence.run_journal import RunRecord
+from hltrader.risk.bootstrap_margin import (
+    BootstrapExpectation,
+    UpdateLeverageCommand,
+    classify_bootstrap_response,
+    save_bootstrap_receipt,
+)
+from hltrader.risk.guard import MarginMode
 from hltrader.strategies.short_btc_rsi import (
     ShortBtcRsiConfig,
     ShortBtcRsiStrategy,
@@ -43,6 +51,7 @@ def test_adapter_is_fail_closed_by_default() -> None:
     assert config.margin_verification_path is None
     assert config.account_address == ""
     assert config.notional_usdc == Decimal(300)
+    assert config.bootstrap_margin_receipt_path is None
 
 
 def test_normal_tpsl_is_explicitly_not_treated_as_atomic() -> None:
@@ -369,3 +378,64 @@ def test_restart_after_economic_close_persists_closed_final(monkeypatch) -> None
     assert strategy._machine.snapshot.state is StrategyState.CLOSED_FINAL
     assert persisted[-1].state is StrategyState.CLOSED_FINAL
     assert submissions == []
+
+
+def test_strategy_consumes_matching_bootstrap_receipt_only_once(tmp_path) -> None:
+    path = tmp_path / "bootstrap.json"
+    account = "0x1111111111111111111111111111111111111111"
+    signer = "0x2222222222222222222222222222222222222222"
+    strategy = ShortBtcRsiStrategy(
+        make_config(
+            account_address=account,
+            bootstrap_margin_receipt_path=str(path),
+            bootstrap_signer_address=signer,
+        )
+    )
+    now = datetime(2026, 9, 2, 12, tzinfo=UTC)
+    expected = BootstrapExpectation(
+        strategy._bootstrap_session_id,
+        account,
+        signer,
+        "testnet",
+        str(INSTRUMENT_ID),
+        "BTC",
+        0,
+        MarginMode.ISOLATED,
+        Decimal(3),
+    )
+    command = UpdateLeverageCommand(
+        strategy._bootstrap_session_id,
+        account,
+        signer,
+        "testnet",
+        str(INSTRUMENT_ID),
+        "BTC",
+        0,
+        False,
+        3,
+        1788346800000,
+    )
+    receipt = classify_bootstrap_response(
+        expected,
+        command,
+        {"status": "ok", "response": {"type": "default"}},
+        observed_at=now,
+    )
+    save_bootstrap_receipt(path, receipt)
+
+    assert strategy._margin_authorizes_entry("entry-1", now=now)
+    assert not strategy._margin_authorizes_entry("entry-2", now=now)
+
+
+def test_strategy_never_uses_bootstrap_receipt_for_mainnet(tmp_path) -> None:
+    strategy = ShortBtcRsiStrategy(
+        make_config(
+            environment="mainnet",
+            account_address="0x1111111111111111111111111111111111111111",
+            bootstrap_margin_receipt_path=str(tmp_path / "bootstrap.json"),
+            bootstrap_signer_address="0x2222222222222222222222222222222222222222",
+        )
+    )
+    assert not strategy._margin_authorizes_entry(
+        "entry-1", now=datetime(2026, 9, 2, 12, tzinfo=UTC)
+    )

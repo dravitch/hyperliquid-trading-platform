@@ -79,7 +79,7 @@ quantités exactes. Le contrat est dans `agora-test-contract-2026-09-01.md`.
 
 ## Preuves exécutées
 
-- 40 tests réussis au moment de cette revue. La suite courante en compte 139; voir
+- 40 tests réussis au moment de cette revue. La suite courante en compte 157; voir
   `PROGRESSION.md` pour les jalons postérieurs.
 - Ruff réussi.
 - `git diff --check` réussi.

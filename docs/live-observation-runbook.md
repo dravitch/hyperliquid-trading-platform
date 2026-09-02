@@ -61,6 +61,36 @@ Consequences:
 The observation runner therefore proves configuration wiring locally. Private venue
 reconciliation remains `TO_PROVE_TESTNET`.
 
+## Three capability levels
+
+### `PUBLIC_DATA_ONLY`
+
+Current supported runner mode. It has the public data client, no execution client, no account
+reports and no signer. It cannot reconcile an existing journal against venue truth.
+
+### `PRIVATE_RECONCILIATION_ONLY`
+
+Candidate mode, not enabled in the runner. NautilusTrader 1.231.0 has no native read-only flag,
+but its account/report reads accept an explicit account address without a signer. The candidate
+`ReadOnlyHyperliquidExecutionClient` preserves those official reads while structurally overriding
+all identified mutation methods. Its factory rejects credentials and mainnet.
+
+Status:
+
+```text
+architecture = SAFE_WRAPPER_FEASIBLE
+local command barrier = PROVEN
+TradingNode startup integration = TO_PROVE
+live private reads = TO_PROVE_TESTNET
+```
+
+See [`private-reconciliation-capability-spike.md`](private-reconciliation-capability-spike.md).
+
+### `EXECUTION_CAPABLE`
+
+Unsupported. This level would contain a signer and the official venue command methods. It remains
+outside `hnt-live-observe` and outside the candidate reconciliation-only factory.
+
 ## Local operator status
 
 `hnt-status` is a read-only view of local orchestration evidence:
@@ -97,4 +127,3 @@ Hyperliquid UI is the venue-side source for:
 
 Neither view silently replaces the other. A combined multi-wallet or multi-strategy dashboard is
 Phase 5/post-MVP work and is not part of this runner.
-

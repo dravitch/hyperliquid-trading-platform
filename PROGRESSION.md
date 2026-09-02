@@ -50,7 +50,7 @@ demeure explicitement désactivé dans la configuration.
 
 ### Tests et qualité
 
-- 139 tests déterministes et d'intégration réussis.
+- 157 tests déterministes et d'intégration réussis.
 - Scénarios couverts : seuils inclusifs, sizing, partial fills, double signal concurrent,
   protection rejetée, absence de réentrée, redémarrage, conflits journal/exchange, journal
   corrompu et désaccord de marge ou de levier.
@@ -324,6 +324,27 @@ signature.
   vue des positions, ordres, PnL, funding et exposition venue.
 - Le dashboard agrégé multi-wallet/multi-strategy est classé Phase 5/post-MVP.
 - Runbook opérateur ajouté dans `docs/live-observation-runbook.md`.
+
+### Spike de séparation réconciliation/commandes
+
+- Inspection source de NautilusTrader 1.231.0 terminée sur la config, la factory, le client
+  Hyperliquid, `LiveExecutionClient`, `ExecutionEngine` et la réconciliation startup.
+- Aucun mode privé read-only natif n'existe : rapports privés et commandes partagent officiellement
+  le même `HyperliquidExecutionClient` et le même transport.
+- Les lectures de compte, positions, ordres et fills peuvent toutefois cibler une
+  `account_address` explicite sans signer; la clé est requise pour rendre une commande venue
+  effective, pas pour résoudre cette identité de lecture.
+- Conclusion du spike : `SAFE_WRAPPER_FEASIBLE`, sans branchement au runner.
+- Candidat `ReadOnlyHyperliquidExecutionClient` ajouté avec surcharge structurelle des six entrées
+  publiques de commande, des six coroutines de mutation et des quatre helpers split/merge/negate.
+- Factory candidate testnet-only : compte explicite obligatoire, signer/vault/env secrets refusés,
+  client HTTP dédié non mis en cache pour éviter toute réutilisation d'un transport signé.
+- 18 tests supplémentaires prouvent la barrière locale, l'héritage intact des méthodes de
+  rapports et la construction du wrapper par un vrai `TradingNode` sans signer.
+  Aucun compte opérateur, secret, socket privée ou commande venue n'est utilisé.
+- La connexion privée réelle, les subscriptions utilisateur, le startup complet et l'effet d'une
+  commande bloquée sur la queue Nautilus restent `TO_PROVE_TESTNET`/`TO_PROVE_INTEGRATION`.
+- Capability map et threat model : `docs/private-reconciliation-capability-spike.md`.
 
 Commande de validation :
 

@@ -27,27 +27,32 @@ default. Its signed mode is guarded separately and must not be confused with a s
 
 ## B. Future testnet strategy runtime
 
-Code inspection on 2 September 2026 found no runner which instantiates a Nautilus `TradingNode`,
-configures Hyperliquid data and execution clients, and adds `ShortBtcRsiStrategy`. The current
-runners are only:
+The initial inspection on 2 September 2026 found no live runner. The new
+`src/hltrader/runners/live.py` now assembles a real `TradingNode`, the Hyperliquid public testnet
+data client and `ShortBtcRsiStrategy` in `DATA_ONLY` mode. The execution client remains explicitly
+blocked because its private reconciliation path can lead to order actions.
+
+The current runners are:
 
 - `src/hltrader/runners/backtest.py`;
+- `src/hltrader/runners/live.py`;
+- `src/hltrader/runners/status.py`;
 - `src/hltrader/runners/update_leverage_spike.py`.
 
-A later milestone must add a distinct entry point such as `src/hltrader/runners/live.py`. Its
-expected wiring, to be validated against NautilusTrader 1.231.0 before implementation, is:
+A later execution milestone must extend the proven data-only boundary with separately authorized
+private reconciliation:
 
 ```text
 TradingNode
     ↓
 HyperliquidDataClientConfig
-HyperliquidExecClientConfig
+HyperliquidExecClientConfig (BLOCKED in DATA_ONLY)
     ↓
 ShortBtcRsiStrategy
 ```
 
-That future runner must remain fail-closed when account identity, environment, margin evidence,
-reconciliation, secrets, or explicit order authorization are absent.
+The future execution boundary must remain fail-closed when account identity, environment, margin
+evidence, reconciliation, secrets, or explicit order authorization are absent.
 
 ## Ordered milestones
 
@@ -60,7 +65,8 @@ reconciliation, secrets, or explicit order authorization are absent.
 6. Run the `updateLeverage` dry-run and review its local plan.
 7. Perform only the separately authorized, guarded and one-shot signed `updateLeverage` spike,
    then close the bootstrap proof from its authoritative or ambiguous result.
-8. Implement the fail-closed live/testnet Nautilus runner.
+8. Extend the proven observation runner with separately authorized, fail-closed private
+   reconciliation while keeping execution unavailable until its own proof closes.
 9. Start `TradingNode` with order submission disabled.
 10. Verify market data and startup reconciliation without trading.
 11. Execute a first testnet cycle with separately approved minimal notional.

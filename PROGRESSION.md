@@ -50,7 +50,7 @@ demeure explicitement désactivé dans la configuration.
 
 ### Tests et qualité
 
-- 127 tests déterministes et d'intégration réussis.
+- 139 tests déterministes et d'intégration réussis.
 - Scénarios couverts : seuils inclusifs, sizing, partial fills, double signal concurrent,
   protection rejetée, absence de réentrée, redémarrage, conflits journal/exchange, journal
   corrompu et désaccord de marge ou de levier.
@@ -303,6 +303,28 @@ signature.
 - La limite du probe backtest est conservée : règle venue mark price
   `DOCUMENTED_CONFIRMED`, équivalence native `BacktestEngine` `UNVERIFIABLE`.
 
+### Runtime Nautilus d'observation testnet
+
+- L'inspection initiale confirme qu'aucun runner live n'existait avant ce jalon.
+- `src/hltrader/runners/live.py` assemble désormais le vrai `TradingNode` NautilusTrader 1.231.0,
+  `HyperliquidDataClientConfig`, `HyperliquidLiveDataClientFactory` et
+  `ShortBtcRsiStrategy` en mode `DATA_ONLY` testnet.
+- `HyperliquidExecClientConfig` est caractérisé mais explicitement bloqué : sa construction résout
+  une identité de signature et sa réconciliation privée peut conduire à des actions d'ordre.
+- `enable_order_submission=false`, `exec_clients={}`, mainnet interdit et présence de
+  `HYPERLIQUID_TESTNET_PK` refusée par le processus d'observation.
+- Un journal existant bloque le startup data-only, car l'absence de positions privées dans le
+  cache ne constitue pas une preuve venue. Journal absent et cache local plat reconstruisent
+  localement `NEVER_ENTERED`, sans revendiquer que le compte venue est plat.
+- `hnt-live-observe --check` construit puis détruit le node sans connexion réseau; wiring local
+  classé `PROVEN_LOCALLY`, stabilité WebSocket et réconciliation privée classées
+  `TO_PROVE_TESTNET`.
+- `hnt-status` lit sans écriture le journal JSON et la dernière preuve JSONL disponible. Il expose
+  notamment `RECOVERY_REQUIRED`/`STATE_CONFLICT` sans concurrencer l'UI Hyperliquid, qui reste la
+  vue des positions, ordres, PnL, funding et exposition venue.
+- Le dashboard agrégé multi-wallet/multi-strategy est classé Phase 5/post-MVP.
+- Runbook opérateur ajouté dans `docs/live-observation-runbook.md`.
+
 Commande de validation :
 
 ```bash
@@ -336,8 +358,8 @@ sur ce dépôt devront donc employer explicitement `id_ed25519_dravitch`, ou une
 6. Exécuter et revoir le dry-run `updateLeverage`, sans clé privée et sans mutation.
 7. Réaliser ensuite, sous mandat séparé, le spike signé one-shot `updateLeverage`, puis fermer sa
    preuve.
-8. Câbler ensuite le runner Nautilus live/testnet fail-closed décrit dans
-   `docs/TESTNET_ROADMAP.md`, avec soumission d'ordres initialement désactivée.
+8. Étendre ensuite, sous mandat séparé, le runner Nautilus testnet d'observation avec une
+   réconciliation privée fail-closed, sans rendre l'exécution disponible avant preuve dédiée.
 9. Avant tout cycle de trading testnet, confirmer la direction du seuil de 60 000 USD, le
    notional de 300 USDC et le mode de marge isolée.
 

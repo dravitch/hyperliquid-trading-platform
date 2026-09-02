@@ -5,3 +5,8 @@ private_key_env: HYPERLIQUID_TESTNET_PK
 vault_env: HYPERLIQUID_TESTNET_VAULT
 reconcile_on_startup: true
 
+observation_runtime:
+  mode: DATA_ONLY
+  enable_order_submission: false
+  journal_path: var/run/short_btc_rsi.json
+  audit_path: var/log/short_btc_rsi.audit.jsonl

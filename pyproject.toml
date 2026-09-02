@@ -14,6 +14,8 @@ dependencies = [
 
 [project.scripts]
 hnt-backtest-probe = "hltrader.runners.backtest:main"
+hnt-live-observe = "hltrader.runners.live:main"
+hnt-status = "hltrader.runners.status:main"
 hnt-update-leverage-spike = "hltrader.runners.update_leverage_spike:main"
 
 [project.optional-dependencies]

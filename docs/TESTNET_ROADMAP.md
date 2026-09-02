@@ -7,7 +7,13 @@ order.
 ## A. Administrative bootstrap spike
 
 ```text
-distinct testnet agent
+mainnet prerequisite for the same master
+        ↓
+testnet faucet eligibility and funding
+        ↓
+distinct authorized testnet agent
+        ↓
+public userRole(agent) → master verification
         ↓
 updateLeverage dry-run
         ↓
@@ -45,20 +51,29 @@ reconciliation, secrets, or explicit order authorization are absent.
 
 ## Ordered milestones
 
-1. Create and authorize a distinct agent on Hyperliquid testnet.
-2. Run the `updateLeverage` dry-run and review its local plan.
-3. Perform only the separately authorized, guarded and one-shot signed `updateLeverage` spike.
-4. Close the bootstrap proof from its authoritative or ambiguous result.
-5. Implement the fail-closed live/testnet Nautilus runner.
-6. Start `TradingNode` with order submission disabled.
-7. Verify market data and startup reconciliation without trading.
-8. Execute a first testnet cycle with separately approved minimal notional.
-9. Run Phase 3.5 crash/restart drills.
-10. Observe WebSocket and order lifecycle behavior for a prolonged period.
-11. Consider a mainnet canary only after all required proofs are closed.
+1. Satisfy and verify the mainnet prerequisite required by the faucet for the same master address.
+2. Fund the testnet account and confirm that the funds are effectively available.
+3. Create and authorize a distinct agent on Hyperliquid testnet.
+4. Verify publicly that `userRole(agent)` returns `role=agent` and the expected master in
+   `data.user`.
+5. Set only the public `HYPERLIQUID_AGENT_ADDRESS` for the dry-run.
+6. Run the `updateLeverage` dry-run and review its local plan.
+7. Perform only the separately authorized, guarded and one-shot signed `updateLeverage` spike,
+   then close the bootstrap proof from its authoritative or ambiguous result.
+8. Implement the fail-closed live/testnet Nautilus runner.
+9. Start `TradingNode` with order submission disabled.
+10. Verify market data and startup reconciliation without trading.
+11. Execute a first testnet cycle with separately approved minimal notional.
+12. Run Phase 3.5 crash/restart drills.
+13. Observe WebSocket and order lifecycle behavior for a prolonged period.
+14. Consider a mainnet canary only after all required proofs are closed.
 
 Each mutation, order-submission step, and mainnet step requires its own authorization. Progress in
 an earlier milestone does not implicitly authorize a later one.
+
+The mainnet prerequisite in step 1 is an operator activation required for testnet faucet
+eligibility. It is not a mainnet strategy-runtime milestone: `HLTRADER_MAINNET_ENABLED=false`
+remains mandatory and no mainnet order is authorized.
 
 ## Backtest evidence boundary
 
@@ -73,4 +88,3 @@ Hyperliquid documents mark price as the venue trigger rule. In the pinned Nautil
 probe, `MarkPriceUpdate` reaches the strategy, but the simulated `STOP_MARKET` does not trigger
 when only mark price crosses the threshold. Phase 2 therefore does not establish full fidelity to
 Hyperliquid. Quote, OHLC and last trade data must never be substituted silently for mark price.
-

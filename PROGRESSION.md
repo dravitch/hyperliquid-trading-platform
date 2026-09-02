@@ -287,6 +287,12 @@ signature.
 - Procédure opérateur testnet documentée : distinction master/agent/secret, création et
   autorisation d'un agent distinct, vérification publique `userRole`, configuration de la seule
   adresse publique et dry-run sans clé privée ni mutation.
+- Le prérequis officiel du faucet est intégré : le même master doit avoir effectué le dépôt
+  mainnet préalable. L'observation `accountValue = 0` signifie que ce prérequis reste à satisfaire;
+  `KB-HOME-HYPERLIQUID-003` renvoie vers la procédure de dépôt de
+  `KB-HOME-HYPERLIQUID-001` sans la dupliquer.
+- Le contrat public `userRole` est explicite : seul `role=agent` avec `data.user` exactement égal
+  au master configuré prouve l'association; toute divergence échoue fermée.
 - Les chemins et libellés exacts de la gestion d'agent dans l'UI testnet restent explicitement
   marqués « À confirmer dans l'UI actuelle » faute de source officielle stable.
 - Inspection du code confirmée : aucun runner n'instancie actuellement `TradingNode` avec
@@ -321,13 +327,18 @@ sur ce dépôt devront donc employer explicitement `id_ed25519_dravitch`, ou une
 
 ## Prochaines étapes
 
-1. Créer et autoriser un agent distinct sur Hyperliquid testnet, puis renseigner seulement son
-   adresse publique pour le dry-run.
-2. Exécuter et revoir le dry-run `updateLeverage`, sans clé privée et sans mutation.
-3. Réaliser, sous mandat séparé, le spike signé one-shot `updateLeverage`, puis fermer sa preuve.
-4. Câbler ensuite le runner Nautilus live/testnet fail-closed décrit dans
+1. Satisfaire et vérifier le prérequis mainnet nécessaire au faucet testnet pour la même adresse
+   master, sans autoriser le trading mainnet et avec `HLTRADER_MAINNET_ENABLED=false`.
+2. Créditer le compte testnet et confirmer la disponibilité effective des fonds testnet.
+3. Créer et autoriser un agent distinct sur Hyperliquid testnet.
+4. Vérifier publiquement `userRole(agent)`: `role=agent` et `data.user` égal au master attendu.
+5. Renseigner uniquement l'adresse publique `HYPERLIQUID_AGENT_ADDRESS` pour le dry-run.
+6. Exécuter et revoir le dry-run `updateLeverage`, sans clé privée et sans mutation.
+7. Réaliser ensuite, sous mandat séparé, le spike signé one-shot `updateLeverage`, puis fermer sa
+   preuve.
+8. Câbler ensuite le runner Nautilus live/testnet fail-closed décrit dans
    `docs/TESTNET_ROADMAP.md`, avec soumission d'ordres initialement désactivée.
-5. Avant tout cycle de trading testnet, confirmer la direction du seuil de 60 000 USD, le
+9. Avant tout cycle de trading testnet, confirmer la direction du seuil de 60 000 USD, le
    notional de 300 USDC et le mode de marge isolée.
 
 ## Décisions et blocages ouverts

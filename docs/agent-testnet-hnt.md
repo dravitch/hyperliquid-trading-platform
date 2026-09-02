@@ -69,20 +69,44 @@ la clé privée du master comme clé du bot.
 
 ## Procédure opérateur testnet
 
-### 1. Accéder au bon environnement
+### 1. Satisfaire le prérequis mainnet du faucet
+
+La documentation officielle du faucet impose un dépôt mainnet préalable avec la **même adresse**
+avant de permettre la réception des fonds testnet. L’observation actuelle
+`accountValue = 0` du master mainnet ne permet donc pas encore de considérer ce prérequis rempli.
+
+Suivre [KB-HOME-HYPERLIQUID-001](depot-et-creation-agent.md) pour la procédure opérateur de dépôt
+mainnet. Ne pas la dupliquer ici. Ce dépôt sert uniquement à l’activation du master et à
+l’éligibilité au faucet testnet : il n’autorise aucun runtime de trading mainnet, aucun ordre
+mainnet et aucun changement de `HLTRADER_MAINNET_ENABLED=false`.
+
+Vérifier que le master utilisé sur testnet est la même adresse que celle ayant satisfait le
+prérequis mainnet avant de continuer.
+
+### 2. Créditer effectivement le compte testnet
+
+1. Ouvrir le faucet officiel : `https://app.hyperliquid-testnet.xyz/drip`.
+2. Connecter le master dont le prérequis mainnet vient d’être vérifié.
+3. Demander les fonds testnet, puis attendre leur disponibilité effective dans le compte testnet.
+4. Ne pas créer l’agent tant que le compte testnet n’est pas effectivement disponible/crédité.
+
+Pour un login par courriel, la documentation prévient que Privy peut produire des adresses
+différentes entre mainnet et testnet. Une adresse différente ne satisfait pas la condition
+« même adresse » et doit être résolue avant de poursuivre.
+
+### 3. Accéder au bon environnement
 
 1. Ouvrir directement l’application officielle testnet :
    `https://app.hyperliquid-testnet.xyz/`.
 2. Vérifier visuellement que l’environnement affiché est bien **testnet** avant toute signature.
 3. Connecter le wallet destiné à être le master testnet.
-4. Ne pas déposer de capital mainnet et conserver `HLTRADER_MAINNET_ENABLED=false`.
+4. Conserver `HLTRADER_MAINNET_ENABLED=false`.
 
 La documentation officielle confirme l’hôte testnet via son faucet
-`https://app.hyperliquid-testnet.xyz/drip`. Pour un login par courriel, elle prévient que Privy
-peut produire des adresses différentes entre mainnet et testnet : il faut donc relever l’adresse
-effectivement connectée au testnet, sans recopier par hypothèse une adresse mainnet.
+`https://app.hyperliquid-testnet.xyz/drip`. Il faut relever l’adresse effectivement connectée au
+testnet, sans la déduire par hypothèse de l’identité mainnet.
 
-### 2. Identifier le master
+### 4. Identifier le master
 
 1. Copier l’adresse publique du wallet actuellement connecté dans l’application testnet.
 2. La comparer à l’adresse affichée par le wallet navigateur, caractère par caractère.
@@ -93,7 +117,7 @@ L’exemple officiel `basic_agent.py` exige que l’adresse du wallet qui approu
 l’adresse du compte. Sinon, l’agent serait autorisé pour le mauvais propriétaire et les actions
 ultérieures échoueraient.
 
-### 3. Créer un agent HNT distinct dans l’UI
+### 5. Créer un agent HNT distinct dans l’UI
 
 Le SDK officiel confirme qu’un agent nommé peut être créé avec le frontend et que l’UI officielle
 mainnet propose une page API. La documentation consultée ne garantit toutefois ni l’URL testnet de
@@ -115,7 +139,7 @@ Dans la zone de gestion des API wallets du testnet :
 Hyperliquid recommande un agent distinct par processus et déconseille de réutiliser l’adresse
 d’un agent désenregistré, car son état de nonce peut être élagué.
 
-### 4. Autoriser l’agent pour le master
+### 6. Autoriser l’agent pour le master
 
 1. Toujours depuis l’application **testnet**, demander l’autorisation du nouvel agent.
 2. Vérifier dans la demande de signature que l’environnement est `Testnet`, que
@@ -129,7 +153,7 @@ Au niveau API, l’action officielle est `approveAgent`; sur testnet son champ
 explique ce que l’UI doit faire : elle ne constitue pas une invitation à copier la clé privée du
 master dans un script.
 
-### 5. Identifier et ranger les trois valeurs
+### 7. Identifier et ranger les trois valeurs
 
 | Valeur | Origine | Destination autorisée maintenant |
 |---|---|---|
@@ -146,7 +170,7 @@ HYPERLIQUID_AGENT_ADDRESS=0x...
 Ne pas ajouter `HYPERLIQUID_TESTNET_PK`. Vérifier que `.env` est ignoré par Git et limiter ses
 permissions si ce fichier contient déjà d’autres secrets locaux.
 
-### 6. Vérifier publiquement le rôle de l’agent
+### 8. Vérifier publiquement le rôle de l’agent
 
 L’endpoint public `userRole` est documenté et peut confirmer que l’adresse est reconnue comme
 `agent` sur le testnet :
@@ -219,6 +243,9 @@ Il ne signe rien, ne change pas le levier et ne soumet aucun ordre.
 
 ## Checklist opérateur
 
+- [ ] Le prérequis mainnet du faucet est satisfait avec le même master
+- [ ] `HLTRADER_MAINNET_ENABLED=false` et aucun trading mainnet n’est autorisé
+- [ ] Le compte testnet est effectivement crédité/disponible
 - [ ] Je suis bien sur Hyperliquid testnet
 - [ ] J’ai identifié le master account correct
 - [ ] L’agent/API wallet possède une adresse différente du master

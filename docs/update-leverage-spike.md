@@ -7,6 +7,11 @@ This spike exists to prove one narrow fact before wiring the full testnet runner
 
 It does **not** submit a trading order and it cannot target mainnet.
 
+This is the administrative bootstrap path, not the strategy runtime. The repository does not yet
+contain a live Nautilus runner which instantiates `TradingNode` with Hyperliquid data/execution
+clients and `ShortBtcRsiStrategy`. The two tracks and their ordered milestones are documented in
+[`TESTNET_ROADMAP.md`](TESTNET_ROADMAP.md).
+
 ## Safety properties
 
 - Dry-run is the default.

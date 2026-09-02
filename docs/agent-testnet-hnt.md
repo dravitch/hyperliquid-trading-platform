@@ -157,17 +157,21 @@ curl -sS https://api.hyperliquid-testnet.xyz/info \
   --data '{"type":"userRole","user":"0x_ADRESSE_PUBLIQUE_AGENT"}'
 ```
 
-Le résultat doit indiquer le rôle `agent`. Selon la forme effectivement renvoyée, vérifier aussi
-que le master associé correspond à `HYPERLIQUID_ACCOUNT_ADDRESS`. La documentation publique
-confirme les rôles possibles, mais n’expose pas de façon assez stable dans sa page textuelle tous
-les champs propres à la variante `agent`.
+La documentation officielle définit explicitement la réponse d’un agent :
+
+```json
+{"role":"agent","data":{"user":"0x_ADRESSE_PUBLIQUE_MASTER"}}
+```
+
+Le champ stable et documenté `data.user` doit correspondre exactement à
+`HYPERLIQUID_ACCOUNT_ADDRESS`. Il constitue le lien public entre l’agent interrogé et son master.
 
 **À confirmer dans l’UI actuelle** : l’affichage explicite du lien entre cet agent nommé et le
 master testnet.
 
-Une réponse `missing`, un format inattendu, un autre rôle ou une association au master impossible
-à établir n’est pas une preuve d’autorisation. Ne pas poursuivre dans ce cas. L’appel `userRole`
-est public, mais coûte un poids API élevé ; ne pas le lancer en boucle.
+Une réponse `missing`, un format inattendu, un autre rôle ou un `data.user` différent du master
+attendu n’est pas une preuve d’autorisation. Ne pas poursuivre dans ce cas. L’appel `userRole` est
+public, mais coûte un poids API élevé ; ne pas le lancer en boucle.
 
 ## Validation locale avant dry-run
 

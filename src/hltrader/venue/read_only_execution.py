@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections import Counter
 from decimal import Decimal
 from typing import Any, NoReturn
 
@@ -13,6 +14,27 @@ from nautilus_trader.cache.cache import Cache
 from nautilus_trader.common.component import LiveClock, MessageBus
 from nautilus_trader.core import nautilus_pyo3
 from nautilus_trader.live.factories import LiveExecClientFactory
+
+NAUTILUS_HYPERLIQUID_MUTATION_METHODS = frozenset(
+    {
+        "submit_order",
+        "submit_order_list",
+        "modify_order",
+        "cancel_order",
+        "cancel_all_orders",
+        "batch_cancel_orders",
+        "_submit_order",
+        "_submit_order_list",
+        "_modify_order",
+        "_cancel_order",
+        "_cancel_all_orders",
+        "_batch_cancel_orders",
+        "_split_outcome",
+        "_merge_outcome",
+        "_merge_question",
+        "_negate_outcome",
+    }
+)
 
 
 class ReadOnlyCapabilityError(RuntimeError):
@@ -31,29 +53,91 @@ class ReadOnlyHyperliquidExecutionClient(HyperliquidExecutionClient):
     and the adapter's protected mutation coroutines fail before touching the transport.
     """
 
-    def submit_order(self, command: Any) -> NoReturn:
-        del command
-        _blocked("submit_order")
+    BLOCK_REASON = "reconciliation-only runtime has no venue command capability"
 
-    def submit_order_list(self, command: Any) -> NoReturn:
-        del command
-        _blocked("submit_order_list")
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._blocked_command_counts: Counter[str] = Counter()
 
-    def modify_order(self, command: Any) -> NoReturn:
-        del command
-        _blocked("modify_order")
+    @property
+    def blocked_command_counts(self) -> dict[str, int]:
+        """Return commands rejected at the local capability boundary."""
+        return dict(self._blocked_command_counts)
 
-    def cancel_order(self, command: Any) -> NoReturn:
-        del command
-        _blocked("cancel_order")
+    def _record_block(self, command: str) -> None:
+        self._blocked_command_counts[command] += 1
 
-    def cancel_all_orders(self, command: Any) -> NoReturn:
-        del command
-        _blocked("cancel_all_orders")
+    def submit_order(self, command: Any) -> None:
+        self._record_block("submit_order")
+        self.generate_order_denied(
+            strategy_id=command.strategy_id,
+            instrument_id=command.instrument_id,
+            client_order_id=command.order.client_order_id,
+            reason=self.BLOCK_REASON,
+            ts_event=self._clock.timestamp_ns(),
+        )
 
-    def batch_cancel_orders(self, command: Any) -> NoReturn:
-        del command
-        _blocked("batch_cancel_orders")
+    def submit_order_list(self, command: Any) -> None:
+        self._record_block("submit_order_list")
+        for order in command.order_list.orders:
+            self.generate_order_denied(
+                strategy_id=command.strategy_id,
+                instrument_id=order.instrument_id,
+                client_order_id=order.client_order_id,
+                reason=self.BLOCK_REASON,
+                ts_event=self._clock.timestamp_ns(),
+            )
+
+    def modify_order(self, command: Any) -> None:
+        self._record_block("modify_order")
+        self.generate_order_modify_rejected(
+            strategy_id=command.strategy_id,
+            instrument_id=command.instrument_id,
+            client_order_id=command.client_order_id,
+            venue_order_id=command.venue_order_id,
+            reason=self.BLOCK_REASON,
+            ts_event=self._clock.timestamp_ns(),
+        )
+
+    def cancel_order(self, command: Any) -> None:
+        self._record_block("cancel_order")
+        self.generate_order_cancel_rejected(
+            strategy_id=command.strategy_id,
+            instrument_id=command.instrument_id,
+            client_order_id=command.client_order_id,
+            venue_order_id=command.venue_order_id,
+            reason=self.BLOCK_REASON,
+            ts_event=self._clock.timestamp_ns(),
+        )
+
+    def cancel_all_orders(self, command: Any) -> None:
+        self._record_block("cancel_all_orders")
+        for order in self._cache.orders_open(
+            venue=self.venue,
+            instrument_id=command.instrument_id,
+            strategy_id=command.strategy_id,
+            side=command.order_side,
+        ):
+            self.generate_order_cancel_rejected(
+                strategy_id=command.strategy_id,
+                instrument_id=order.instrument_id,
+                client_order_id=order.client_order_id,
+                venue_order_id=order.venue_order_id,
+                reason=self.BLOCK_REASON,
+                ts_event=self._clock.timestamp_ns(),
+            )
+
+    def batch_cancel_orders(self, command: Any) -> None:
+        self._record_block("batch_cancel_orders")
+        for cancel in command.cancels:
+            self.generate_order_cancel_rejected(
+                strategy_id=command.strategy_id,
+                instrument_id=cancel.instrument_id,
+                client_order_id=cancel.client_order_id,
+                venue_order_id=cancel.venue_order_id,
+                reason=self.BLOCK_REASON,
+                ts_event=self._clock.timestamp_ns(),
+            )
 
     async def _submit_order(self, command: Any) -> NoReturn:
         del command

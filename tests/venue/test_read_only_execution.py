@@ -11,6 +11,7 @@ from nautilus_trader.core import nautilus_pyo3
 from nautilus_trader.live.node import TradingNode
 
 from hltrader.venue.read_only_execution import (
+    NAUTILUS_HYPERLIQUID_MUTATION_METHODS,
     ReadOnlyCapabilityError,
     ReadOnlyHyperliquidExecClientFactory,
     ReadOnlyHyperliquidExecutionClient,
@@ -49,8 +50,31 @@ def test_public_command_methods_are_structurally_overridden() -> None:
         assert getattr(ReadOnlyHyperliquidExecutionClient, method_name) is not getattr(
             HyperliquidExecutionClient, method_name
         )
-        with pytest.raises(ReadOnlyCapabilityError, match=method_name):
-            getattr(ReadOnlyHyperliquidExecutionClient, method_name)(None, object())
+
+
+def test_pinned_adapter_mutation_inventory_has_not_changed() -> None:
+    mutation_prefixes = (
+        "submit_",
+        "modify_",
+        "cancel_",
+        "batch_cancel_",
+        "_submit_",
+        "_modify_",
+        "_cancel_",
+        "_batch_cancel_",
+        "_split_",
+        "_merge_",
+        "_negate_",
+    )
+    observed = {
+        name
+        for name in dir(HyperliquidExecutionClient)
+        if name != "cancel_pending_tasks"
+        and name.startswith(mutation_prefixes)
+        and callable(getattr(HyperliquidExecutionClient, name, None))
+    }
+
+    assert observed == NAUTILUS_HYPERLIQUID_MUTATION_METHODS
 
 
 @pytest.mark.parametrize("method_name", INTERNAL_MUTATIONS)
@@ -156,7 +180,6 @@ def test_trading_node_builds_candidate_wrapper_without_signer(monkeypatch) -> No
         assert len(clients) == 1
         client = next(iter(clients.values()))
         assert isinstance(client, ReadOnlyHyperliquidExecutionClient)
-        with pytest.raises(ReadOnlyCapabilityError, match="submit_order"):
-            client.submit_order(object())
+        assert client.blocked_command_counts == {}
     finally:
         node.dispose()

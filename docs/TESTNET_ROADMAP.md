@@ -30,7 +30,9 @@ default. Its signed mode is guarded separately and must not be confused with a s
 The initial inspection on 2 September 2026 found no live runner. The new
 `src/hltrader/runners/live.py` now assembles a real `TradingNode`, the Hyperliquid public testnet
 data client and `ShortBtcRsiStrategy` in `DATA_ONLY` mode. The execution client remains explicitly
-blocked because its private reconciliation path can lead to order actions.
+absent from that runner. A separate account-state reconciliation wrapper is now engine-safe in
+disconnected tests: command attempts settle through official rejection events and reach neither
+transport. It is not yet wired into the runner, and its live account-state behavior is unproven.
 
 The current runners are:
 
@@ -39,8 +41,8 @@ The current runners are:
 - `src/hltrader/runners/status.py`;
 - `src/hltrader/runners/update_leverage_spike.py`.
 
-A later execution milestone must extend the proven data-only boundary with separately authorized
-private reconciliation:
+A later disconnected milestone must extend the proven data-only boundary with
+`ACCOUNT_STATE_RECONCILIATION_ONLY` before any live test:
 
 ```text
 TradingNode
@@ -65,8 +67,8 @@ evidence, reconciliation, secrets, or explicit order authorization are absent.
 6. Run the `updateLeverage` dry-run and review its local plan.
 7. Perform only the separately authorized, guarded and one-shot signed `updateLeverage` spike,
    then close the bootstrap proof from its authoritative or ambiguous result.
-8. Extend the proven observation runner with separately authorized, fail-closed private
-   reconciliation while keeping execution unavailable until its own proof closes.
+8. Wire the engine-safe wrapper in a disconnected `ACCOUNT_STATE_RECONCILIATION_ONLY` runner
+   while keeping execution unavailable, then separately prove account-state reads on testnet.
 9. Start `TradingNode` with order submission disabled.
 10. Verify market data and startup reconciliation without trading.
 11. Execute a first testnet cycle with separately approved minimal notional.

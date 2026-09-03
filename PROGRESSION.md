@@ -50,7 +50,7 @@ demeure explicitement désactivé dans la configuration.
 
 ### Tests et qualité
 
-- 157 tests déterministes et d'intégration réussis.
+- 165 tests déterministes et d'intégration réussis.
 - Scénarios couverts : seuils inclusifs, sizing, partial fills, double signal concurrent,
   protection rejetée, absence de réentrée, redémarrage, conflits journal/exchange, journal
   corrompu et désaccord de marge ou de levier.
@@ -334,7 +334,9 @@ signature.
 - Les lectures de compte, positions, ordres et fills peuvent toutefois cibler une
   `account_address` explicite sans signer; la clé est requise pour rendre une commande venue
   effective, pas pour résoudre cette identité de lecture.
-- Conclusion du spike : `SAFE_WRAPPER_FEASIBLE`, sans branchement au runner.
+- Conclusion architecturale initiale du spike : `SAFE_WRAPPER_FEASIBLE`, sans branchement au
+  runner; le jalon suivant a depuis fermé la preuve engine par
+  `RECONCILIATION_WRAPPER_ENGINE_SAFE`.
 - Candidat `ReadOnlyHyperliquidExecutionClient` ajouté avec surcharge structurelle des six entrées
   publiques de commande, des six coroutines de mutation et des quatre helpers split/merge/negate.
 - Factory candidate testnet-only : compte explicite obligatoire, signer/vault/env secrets refusés,
@@ -342,9 +344,40 @@ signature.
 - 18 tests supplémentaires prouvent la barrière locale, l'héritage intact des méthodes de
   rapports et la construction du wrapper par un vrai `TradingNode` sans signer.
   Aucun compte opérateur, secret, socket privée ou commande venue n'est utilisé.
-- La connexion privée réelle, les subscriptions utilisateur, le startup complet et l'effet d'une
-  commande bloquée sur la queue Nautilus restent `TO_PROVE_TESTNET`/`TO_PROVE_INTEGRATION`.
+- Les lectures de compte et subscriptions account-scoped réelles restent `TO_PROVE_TESTNET`.
+  L'effet d'une commande bloquée sur la queue Nautilus est désormais prouvé localement dans le
+  jalon suivant.
 - Capability map et threat model : `docs/private-reconciliation-capability-spike.md`.
+
+### Sécurité du wrapper dans l'ExecutionEngine — jalon suivant
+
+- Verdict local : `RECONCILIATION_WRAPPER_ENGINE_SAFE` pour NautilusTrader 1.231.0.
+- Le premier blocage par exception a été réfuté comme sémantique publique : la queue survivait,
+  mais l'ordre pouvait rester `INITIALIZED` dans le cache après son ajout par l'ExecutionEngine.
+- Les six entrées publiques de commande produisent désormais les événements Nautilus officiels
+  `OrderDenied`, `OrderModifyRejected` ou `OrderCancelRejected`; les coroutines de transport et
+  helpers mutationnels restent bloqués par exception en défense profonde.
+- Un vrai `TradingNode`, un vrai `LiveRiskEngine`, un vrai `LiveExecutionEngine`, le vrai wrapper
+  et une stratégie enregistrée couvrent submit, modify, cancel, cancel-all et batch-cancel.
+- Un canary remplace les transports HTTP et WS dans le test : total des appels mutationnels = 0.
+- Après chaque blocage, les queues risque/exécution sont vides, leurs tâches restent actives, les
+  compteurs de retry restent nuls et aucune nouvelle commande n'apparaît après temporisation.
+- Des `PositionStatusReport` et `OrderStatusReport` déterministes injectés via l'interface de
+  réconciliation officielle prouvent les états intermédiaires : plat → `NEVER_ENTERED`,
+  protection exacte → `OPEN`, protection partielle → `EMERGENCY_EXIT`, reprise `EXITING` bloquée
+  → `RECOVERY_REQUIRED`, urgence exposée absorbante, et `RECOVERY_REQUIRED` inerte.
+- Un flatten localement refusé est retiré de `_flatten_outstanding`; aucun ordre non transmis
+  n'est présenté comme pending. Le watchdog de protection est annulé et son callback tardif est
+  inerte après l'échec. Le callback tardif de synchronisation d'exposition est également sans
+  effet hors de `ENTERING`/`PROTECTING`/`OPEN`.
+- Inventaire épinglé de 16 méthodes mutantes Hyperliquid. CI échoue si les familles connues
+  submit/modify/cancel/split/merge/negate changent; toute montée de version Nautilus impose une
+  nouvelle inspection source.
+- Terminologie clarifiée : lectures `ACCOUNT_STATE_READS` / `ACCOUNT_SCOPED_READS`; une action
+  privée authentifiée désigne uniquement un chemin utilisant réellement un signer agent.
+- ADR 0007 consigne le choix définitif du rejet par événements et sa portée strictement locale.
+- La connexion testnet, les account-scoped WebSockets, le mass-status réel et la stabilité sous
+  concurrence réseau restent non prouvés. Le wrapper n'est toujours pas câblé dans le runner.
 
 Commande de validation :
 
@@ -379,8 +412,9 @@ sur ce dépôt devront donc employer explicitement `id_ed25519_dravitch`, ou une
 6. Exécuter et revoir le dry-run `updateLeverage`, sans clé privée et sans mutation.
 7. Réaliser ensuite, sous mandat séparé, le spike signé one-shot `updateLeverage`, puis fermer sa
    preuve.
-8. Étendre ensuite, sous mandat séparé, le runner Nautilus testnet d'observation avec une
-   réconciliation privée fail-closed, sans rendre l'exécution disponible avant preuve dédiée.
+8. Câbler d'abord hors réseau, sous mandat séparé, un mode
+   `ACCOUNT_STATE_RECONCILIATION_ONLY` utilisant le wrapper engine-safe, puis seulement vérifier
+   les lectures de compte sur testnet sans signer et sans rendre l'exécution disponible.
 9. Avant tout cycle de trading testnet, confirmer la direction du seuil de 60 000 USD, le
    notional de 300 USDC et le mode de marge isolée.
 

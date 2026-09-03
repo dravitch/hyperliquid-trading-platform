@@ -10,7 +10,9 @@ from nautilus_trader.model.data import Bar, BarType
 from nautilus_trader.model.enums import OrderSide, OrderStatus, OrderType
 from nautilus_trader.model.events import (
     OrderAccepted,
+    OrderDenied,
     OrderFilled,
+    OrderModifyRejected,
     OrderRejected,
     OrderUpdated,
     PositionClosed,
@@ -177,18 +179,62 @@ class ShortBtcRsiStrategy(Strategy):
         self._handle_protection_confirmation(event.client_order_id)
 
     def on_order_rejected(self, event: OrderRejected) -> None:
-        if self._protective_order_id is None or event.client_order_id != self._protective_order_id:
+        self._handle_protective_failure(
+            event.client_order_id,
+            f"protective trigger rejected: {event.reason}",
+        )
+
+    def on_order_denied(self, event: OrderDenied) -> None:
+        """Settle a command denied locally by a capability/risk boundary."""
+        client_order_id = event.client_order_id
+        if client_order_id in self._flatten_outstanding:
+            self._flatten_outstanding.pop(client_order_id, None)
+            snapshot = self._machine.snapshot
+            if snapshot.state is StrategyState.EXITING:
+                self._machine.recovery_required(
+                    f"exit command denied: {event.reason}",
+                    allowed={StrategyState.EXITING},
+                )
+            self._persist()
+            self.log.error("Exit command denied; no venue command is pending")
+            return
+        if client_order_id == self._entry_order_id:
+            try:
+                self._machine.recovery_required(
+                    f"entry command denied: {event.reason}",
+                    allowed={StrategyState.ENTERING},
+                )
+            except InvalidTransition:
+                return
+            self._persist()
+            return
+        self._handle_protective_failure(
+            client_order_id,
+            f"protective trigger denied: {event.reason}",
+        )
+
+    def on_order_modify_rejected(self, event: OrderModifyRejected) -> None:
+        self._handle_protective_failure(
+            event.client_order_id,
+            f"protective trigger modify rejected: {event.reason}",
+        )
+
+    def _handle_protective_failure(
+        self,
+        client_order_id: ClientOrderId,
+        reason: str,
+    ) -> None:
+        if self._protective_order_id is None or client_order_id != self._protective_order_id:
             return
         if self._machine.snapshot.state is not StrategyState.PROTECTING:
             return
         try:
-            snapshot = self._machine.protection_failed(
-                f"protective trigger rejected: {event.reason}"
-            )
+            snapshot = self._machine.protection_failed(reason)
         except InvalidTransition:
             return
         if snapshot.state is not StrategyState.EMERGENCY_EXIT:
             return
+        self._cancel_protection_timer()
         self._persist()
         self._emergency_flatten()
 
@@ -305,6 +351,12 @@ class ShortBtcRsiStrategy(Strategy):
         )
 
     def _converge_protection(self) -> None:
+        if self._machine.snapshot.state not in {
+            StrategyState.ENTERING,
+            StrategyState.PROTECTING,
+            StrategyState.OPEN,
+        }:
+            return
         actual_qty = self._actual_short_qty()
         if actual_qty <= 0:
             self._schedule_exposure_sync_retry()

@@ -1,126 +1,132 @@
-# Hyperliquid private reconciliation capability spike
+# Hyperliquid account-state reconciliation capability spike
 
 ## Verdict
 
 ```text
-SAFE_WRAPPER_FEASIBLE
+RECONCILIATION_WRAPPER_ENGINE_SAFE
 ```
 
-NautilusTrader 1.231.0 has no native private read-only mode. Its official Hyperliquid execution
-client combines report queries, private/user subscriptions and venue commands in one class over
-one HTTP/WS client. However, the report and subscription paths can identify an account from an
-explicit public `account_address` without a signer. A structural wrapper can therefore preserve
-the official read/reconciliation implementation while overriding every command entry point.
+For NautilusTrader 1.231.0, the reconciliation-only wrapper blocks every identified command
+before either Hyperliquid transport and settles the real `LiveRiskEngine` / `LiveExecutionEngine`
+path deterministically. This is a local, disconnected proof. It does not prove testnet account
+responses or WebSocket behavior.
 
-The wrapper is implemented and tested as a candidate boundary, but it is not registered in
-`hnt-live-observe`. No private connection or live reconciliation was performed.
+The original synchronous `ReadOnlyCapabilityError` at the public methods was rejected: the
+`ExecutionEngine` catches the exception and keeps its queue alive, but the submitted order has
+already entered the cache as `INITIALIZED`. That leaves a false non-terminal local order. Public
+methods now emit Nautilus's official `OrderDenied`, `OrderModifyRejected` or
+`OrderCancelRejected` events. Protected mutation coroutines still raise as defense in depth.
 
 ## Inspected NautilusTrader 1.231.0 paths
 
-- `adapters/hyperliquid/config.py`: `HyperliquidExecClientConfig` has no `read_only` flag.
-- `adapters/hyperliquid/factories.py`: the official factory resolves the execution account and
-  creates one `HyperliquidHttpClient` used by `HyperliquidExecutionClient`.
-- `adapters/hyperliquid/execution.py`: `_connect` loads account state and subscribes to order
-  updates/user events; report methods call `request_*`; command methods call WS/HTTP mutation
-  methods.
-- `live/execution_client.py`: public `submit_order`, `modify_order` and cancellation methods
-  schedule their protected mutation coroutines. `generate_mass_status` combines orders, fills and
-  positions for startup reconciliation.
-- `live/execution_engine.py`: startup reconciliation calls `generate_mass_status`; continuous
-  reconciliation reads reports. Synthetic reconciliation orders are local cache/event constructs,
-  not venue submissions.
-- `execution/engine.pyx`: strategy commands are routed to the registered execution client's public
-  submit/modify/cancel methods.
+- `HyperliquidExecClientConfig` has no read-only flag.
+- The official factory creates one `HyperliquidHttpClient` shared by account-state reports and
+  venue mutations.
+- `HyperliquidExecutionClient._connect` loads account state and subscribes by explicit account
+  address; report methods use `request_*`; mutations use the HTTP/WS command methods.
+- `LiveExecutionEngine.execute` enqueues commands. Its command loop catches client exceptions,
+  but an exception does not synthesize an order terminal event.
+- `ExecutionEngine._execute_command` adds a submitted order to the cache before calling the
+  execution client's public `submit_order` method.
+- Startup reconciliation calls `generate_mass_status`; reconciliation reports update local cache
+  and events. They are not venue mutations.
 
 ## Capability map
 
-| Capability | Data client | Exec client | Requires signer for read | Can mutate venue |
+| Capability | Data client | Exec client | Signer required | Can mutate venue |
 |---|---:|---:|---:|---:|
-| public quotes | yes | no | no | no |
-| bars | yes | no | no | no |
+| public quotes / bars | yes | no | no | no |
 | account state | no | yes | no, with explicit account address | no |
 | position reports | no | yes | no, with explicit account address | no |
 | order status/open orders | no | yes | no, with explicit account address | no |
 | fill reports | no | yes | no, with explicit account address | no |
-| order updates/user events WS | no | yes | no; subscription uses account address | no |
-| submit order/list | no | yes | yes for an effective venue command | yes |
-| modify order | no | yes | yes for an effective venue command | yes |
-| cancel/batch/cancel-all | no | yes | yes for an effective venue command | yes |
-| split/merge/negate outcome helpers | no | yes | yes for an effective venue command | yes |
+| account-scoped WS events | no | yes | no; subscription is address-scoped | no |
+| submit / modify / cancel | no | yes | yes for an effective command | yes |
+| split / merge / negate helpers | no | yes | yes for an effective command | yes |
 
-The “exec client” column describes the official class boundary, not a claim that all listed reads
-are cryptographically private. Hyperliquid exposes the relevant account reads by address. In
-Nautilus they are nevertheless delivered through the execution adapter and execution reports.
+These are `ACCOUNT_STATE_READS` or `ACCOUNT_SCOPED_READS`: Hyperliquid exposes them by address;
+they are not authenticated private actions. “Private authenticated action” is reserved here for a
+path using an agent wallet signer.
 
-## Alternatives evaluated
+## Engine proof
 
-### A. Native read-only mode
+The disconnected integration harness constructs a real `TradingNode`, real risk and execution
+engines, the real wrapper, and a registered Nautilus `Strategy`. Both underlying `_client` and
+`_ws_client` are replaced only in the test by a mutation canary which raises
+`MUTATION TRANSPORT REACHED` on any call.
 
-Rejected for 1.231.0. Neither `HyperliquidExecClientConfig`, the factory, the execution client nor
-`LiveExecEngineConfig` exposes a flag which removes command methods while retaining reports.
+Observed command results:
+
+| Intent | Local result | Queue result | Transport calls |
+|---|---|---|---:|
+| submit | `OrderDenied`; cached order becomes `DENIED` | settled | 0 |
+| modify | `OrderModifyRejected`; working order remains `ACCEPTED` | settled | 0 |
+| cancel | `OrderCancelRejected`; working order remains `ACCEPTED` | settled | 0 |
+| cancel all | cancel rejection for each matching local order | settled | 0 |
+| batch cancel | cancel rejection for each item | settled | 0 |
+
+After drain and an additional observation interval:
 
 ```text
-native_read_only_mode = NO
+risk command queue = 0
+risk event queue = 0
+execution command queue = 0
+execution event queue = 0
+reconciliation retry counters = 0
+position retry counters = 0
+queue tasks = alive
+mutation canary calls = 0
 ```
 
-### B. Capability wrapper
+Queue sizes and retry counters require pinned Nautilus 1.231.0 internals because no equivalent
+public inspection API exists.
 
-Feasible as a candidate. `ReadOnlyHyperliquidExecutionClient` inherits official connection,
-subscription and report methods, but overrides:
+## Startup lifecycle scenarios
 
-- all six public command entry points used by `ExecutionEngine`;
-- their six protected mutation coroutines;
-- four additional split/merge/negate mutation helpers.
+Deterministic `PositionStatusReport` and `OrderStatusReport` objects are passed through the real
+execution reconciliation interface before `ShortBtcRsiStrategy` starts:
 
-`ReadOnlyHyperliquidExecClientFactory` additionally requires testnet and an explicit
-`account_address`, rejects config credentials, vaults and credential environment variables, and
-constructs a dedicated non-cached HTTP client. It never reuses the official process-global cached
-client, which could previously have been created with a signer.
-
-The wrapper currently raises `ReadOnlyCapabilityError` synchronously before a public command can
-schedule a transport coroutine. This is fail-closed, although the effect of that exception on a
-full live engine lifecycle remains to be tested before integration.
-
-### C. Separate private reader
-
-Technically possible using address-based Hyperliquid info calls, but not selected. It would require
-reimplementing or adapting Nautilus report parsing and feeding the execution reconciliation API.
-The wrapper reuses the official adapter's account state, reports and subscriptions with a smaller
-divergence.
-
-## Threat model
-
-| Scenario | Candidate barrier | Remaining proof |
+| Observed state / journal | Result | Command boundary |
 |---|---|---|
-| strategy bug calls `submit_order` | public wrapper override raises before task/transport | full node command-queue behavior |
-| late timer submits during startup | same public override | deterministic node lifecycle test |
-| reconciliation emits a command | Nautilus reconciliation itself applies local reports/events; any later strategy command meets wrapper | startup with real report fixtures/live account |
-| Nautilus retry path submits automatically | mutation coroutine never entered, so its retry/WS-post path cannot start | regression audit on Nautilus upgrades |
-| existing journal restores `EMERGENCY_EXIT` | flatten reaches blocked public submit method | resulting state/error handling in wired node |
-| open exposure discovered at startup | reports can populate cache; any protection/flatten command is blocked | safe operator outcome and no queue-task loss |
+| flat, no journal | `NEVER_ENTERED` | no command |
+| short + exact accepted protector | `OPEN` | no command |
+| short + partial accepted protector | modify denied, then `EMERGENCY_EXIT` | wrapper blocks modify; risk denies flatten; zero transport |
+| `EXITING` + shortfall | `RECOVERY_REQUIRED` | reduce-only flatten denied locally; zero transport |
+| `EMERGENCY_EXIT` + exposure | remains `EMERGENCY_EXIT` | reduce-only flatten denied locally; zero transport |
+| `RECOVERY_REQUIRED` | remains absorbing | no command |
 
-## Invariants and limits
+`ShortBtcRsiStrategy.on_order_denied` removes denied flatten quantities from
+`_flatten_outstanding`. A normal exit denial becomes `RECOVERY_REQUIRED`; an emergency flatten
+denial preserves the absorbing `EMERGENCY_EXIT`. Protective submit/modify denial enters
+`EMERGENCY_EXIT` and cancels its watchdog. Replaying the late timeout or the exposure-sync
+callback is inert. No case claims a venue command is pending after local denial.
 
-```text
-PRIVATE_RECONCILIATION
-MUST NOT imply
-COMMAND_CAPABILITY
-```
+## Mutation inventory and upgrade policy
+
+The wrapper pins the 16 identified Hyperliquid mutation methods in
+`NAUTILUS_HYPERLIQUID_MUTATION_METHODS`. A test derives the adapter methods matching the known
+submit/modify/cancel/split/merge/negate families and requires exact equality. Any change in those
+families after a Nautilus upgrade fails CI and requires a fresh source audit before updating the
+set. This guard is deliberately bounded; it does not claim to infer every possible future
+mutation from semantics alone.
+
+## Remaining limits
 
 Locally proven:
 
-- explicit account identity resolves without a signer;
-- official report implementations remain inherited unchanged;
-- every identified public and internal Hyperliquid mutation entry point is overridden;
-- factory rejects mainnet, signer, vault, missing account and credential-bearing environment.
+- real Strategy → RiskEngine → ExecutionEngine → wrapper command flow;
+- official reconciliation reports feeding position and protector state;
+- zero HTTP/WS mutation calls for all tested commands and lifecycle resumptions;
+- deterministic queue drain, no retries and no false submitted/outstanding state;
+- factory still refuses signer, vault, credential environment, mainnet and missing account.
 
 Not proven:
 
-- real account state/report responses without a signer on testnet;
-- WebSocket user subscriptions against a real account;
-- full startup reconciliation with the wrapper registered in `TradingNode`;
-- behavior of the execution command queue after a blocked command;
-- completeness of the mutation inventory after a NautilusTrader upgrade.
+- real testnet account-state report contents without a signer;
+- account-scoped WebSocket subscription and reconnect behavior;
+- startup mass-status timing and ordering against a real account;
+- long-running queue behavior under real WS concurrency;
+- semantic completeness of the mutation inventory after a future adapter redesign.
 
-For those reasons the candidate factory is not wired into the runner yet.
-
+The wrapper remains unwired from `hnt-live-observe` until a separately authorized disconnected
+runner-integration milestone applies the decision in ADR 0007.

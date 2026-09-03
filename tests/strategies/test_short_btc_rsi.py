@@ -142,6 +142,7 @@ def test_rejection_during_resize_enters_emergency_once(monkeypatch) -> None:
     persisted = []
     monkeypatch.setattr(strategy, "_persist", lambda: persisted.append(strategy._machine.snapshot))
     monkeypatch.setattr(strategy, "_emergency_flatten", lambda: flatten_calls.append(True))
+    monkeypatch.setattr(strategy, "_cancel_protection_timer", lambda: None)
     event = SimpleNamespace(client_order_id=ClientOrderId("P-1"), reason="resize rejected")
 
     strategy.on_order_rejected(event)

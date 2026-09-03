@@ -44,21 +44,22 @@ the strategy. No claim is made yet about prolonged WebSocket stability or venue 
 
 ## Reconciliation boundary
 
-Hyperliquid's execution client resolves an execution account from private signing identity during
-construction. It is also the path which supplies private orders, positions and account events to
-Nautilus reconciliation. It is deliberately absent here.
+Hyperliquid's execution client can resolve an account from an explicit public address without a
+signer. It is the Nautilus path which supplies account-scoped orders, positions and events to
+reconciliation, but the official class also exposes mutations. It remains absent from this
+`DATA_ONLY` runner.
 
 Consequences:
 
 - a missing journal plus an empty local cache initializes the strategy as `NEVER_ENTERED`;
 - `enable_order_submission=false` prevents the flat strategy from entering;
 - this proves local startup semantics, not that the venue account is economically flat;
-- an existing journal blocks startup because data-only mode cannot reconcile it against private
-  venue state;
+- an existing journal blocks startup because data-only mode cannot reconcile it against venue
+  account state;
 - `EXECUTION_CAPABLE` requires a future, separately authorized runner and tests proving that its
   reconciliation cannot produce an unintended order.
 
-The observation runner therefore proves configuration wiring locally. Private venue
+The observation runner therefore proves configuration wiring locally. Venue account-state
 reconciliation remains `TO_PROVE_TESTNET`.
 
 ## Three capability levels
@@ -68,20 +69,23 @@ reconciliation remains `TO_PROVE_TESTNET`.
 Current supported runner mode. It has the public data client, no execution client, no account
 reports and no signer. It cannot reconcile an existing journal against venue truth.
 
-### `PRIVATE_RECONCILIATION_ONLY`
+### `ACCOUNT_STATE_RECONCILIATION_ONLY`
 
-Candidate mode, not enabled in the runner. NautilusTrader 1.231.0 has no native read-only flag,
-but its account/report reads accept an explicit account address without a signer. The candidate
-`ReadOnlyHyperliquidExecutionClient` preserves those official reads while structurally overriding
-all identified mutation methods. Its factory rejects credentials and mainnet.
+Mode proven engine-safe locally, but not enabled in the runner. NautilusTrader 1.231.0 has no
+native read-only flag, but its account/report reads accept an explicit account address without a
+signer. The `ReadOnlyHyperliquidExecutionClient` preserves those official reads while
+structurally overriding all identified mutation methods. Public commands produce official local
+denial/rejection events; protected mutation coroutines remain blocked. Its factory rejects
+credentials and mainnet.
 
 Status:
 
 ```text
-architecture = SAFE_WRAPPER_FEASIBLE
-local command barrier = PROVEN
-TradingNode startup integration = TO_PROVE
-live private reads = TO_PROVE_TESTNET
+architecture = RECONCILIATION_WRAPPER_ENGINE_SAFE
+real TradingNode / ExecutionEngine path = PROVEN_LOCALLY
+mutation transport calls = 0
+runner integration = TO_IMPLEMENT_DISCONNECTED
+live account-state reads = TO_PROVE_TESTNET
 ```
 
 See [`private-reconciliation-capability-spike.md`](private-reconciliation-capability-spike.md).

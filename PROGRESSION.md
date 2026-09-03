@@ -1,6 +1,6 @@
 # Progression du projet
 
-Dernière mise à jour : 1 septembre 2026
+Dernière mise à jour : 2 septembre 2026
 
 ## État général
 
@@ -50,7 +50,7 @@ demeure explicitement désactivé dans la configuration.
 
 ### Tests et qualité
 
-- 120 tests déterministes et d'intégration réussis.
+- 127 tests déterministes et d'intégration réussis.
 - Scénarios couverts : seuils inclusifs, sizing, partial fills, double signal concurrent,
   protection rejetée, absence de réentrée, redémarrage, conflits journal/exchange, journal
   corrompu et désaccord de marge ou de levier.
@@ -280,6 +280,29 @@ signature.
 - Le document indique explicitement qu'aucun ordre testnet ou mainnet n'a encore été soumis et
   que les runners demeurent bloqués.
 
+### Agent testnet HNT dans KBM et recalage de la roadmap
+
+- Article `KB-HOME-HYPERLIQUID-003` publié sous `Corpus > HOME > Hyperliquid`, sans modifier les
+  deux articles existants.
+- Procédure opérateur testnet documentée : distinction master/agent/secret, création et
+  autorisation d'un agent distinct, vérification publique `userRole`, configuration de la seule
+  adresse publique et dry-run sans clé privée ni mutation.
+- Le prérequis officiel du faucet est intégré : le même master doit avoir effectué le dépôt
+  mainnet préalable. L'observation `accountValue = 0` signifie que ce prérequis reste à satisfaire;
+  `KB-HOME-HYPERLIQUID-003` renvoie vers la procédure de dépôt de
+  `KB-HOME-HYPERLIQUID-001` sans la dupliquer.
+- Le contrat public `userRole` est explicite : seul `role=agent` avec `data.user` exactement égal
+  au master configuré prouve l'association; toute divergence échoue fermée.
+- Les chemins et libellés exacts de la gestion d'agent dans l'UI testnet restent explicitement
+  marqués « À confirmer dans l'UI actuelle » faute de source officielle stable.
+- Inspection du code confirmée : aucun runner n'instancie actuellement `TradingNode` avec
+  `HyperliquidDataClientConfig`, `HyperliquidExecClientConfig` et `ShortBtcRsiStrategy`.
+- `docs/TESTNET_ROADMAP.md` sépare désormais le spike administratif `updateLeverage` du futur
+  runtime stratégie testnet fail-closed et ordonne les jalons jusqu'aux crash/restart drills,
+  à l'observation WebSocket prolongée puis à un éventuel canary mainnet.
+- La limite du probe backtest est conservée : règle venue mark price
+  `DOCUMENTED_CONFIRMED`, équivalence native `BacktestEngine` `UNVERIFIABLE`.
+
 Commande de validation :
 
 ```bash
@@ -304,11 +327,19 @@ sur ce dépôt devront donc employer explicitement `id_ed25519_dravitch`, ou une
 
 ## Prochaines étapes
 
-1. Réaliser un spike testnet contrôlé de la seule mutation `updateLeverage` sur compte plat afin
-   de confirmer empiriquement son acceptation par l'agent et son comportement pré-position.
-2. Câbler ensuite un runner testnet fail-closed, maintenu désactivé sans agent et sans secrets.
-3. Avant tout testnet, confirmer la direction du seuil de 60 000 USD, le notional de 300 USDC et
-   le mode de marge isolée.
+1. Satisfaire et vérifier le prérequis mainnet nécessaire au faucet testnet pour la même adresse
+   master, sans autoriser le trading mainnet et avec `HLTRADER_MAINNET_ENABLED=false`.
+2. Créditer le compte testnet et confirmer la disponibilité effective des fonds testnet.
+3. Créer et autoriser un agent distinct sur Hyperliquid testnet.
+4. Vérifier publiquement `userRole(agent)`: `role=agent` et `data.user` égal au master attendu.
+5. Renseigner uniquement l'adresse publique `HYPERLIQUID_AGENT_ADDRESS` pour le dry-run.
+6. Exécuter et revoir le dry-run `updateLeverage`, sans clé privée et sans mutation.
+7. Réaliser ensuite, sous mandat séparé, le spike signé one-shot `updateLeverage`, puis fermer sa
+   preuve.
+8. Câbler ensuite le runner Nautilus live/testnet fail-closed décrit dans
+   `docs/TESTNET_ROADMAP.md`, avec soumission d'ordres initialement désactivée.
+9. Avant tout cycle de trading testnet, confirmer la direction du seuil de 60 000 USD, le
+   notional de 300 USDC et le mode de marge isolée.
 
 ## Décisions et blocages ouverts
 
